@@ -1,0 +1,557 @@
+=======================================================================
+                  PROJECT CONTEXT & METADATA OVERVIEW                  
+=======================================================================
+Generated On : 2026-06-23 12:50:10
+Files Parsed : 12
+Total Lines  : 461
+=======================================================================
+
+
+///////////////////////////////////////////////////////////////////////////
+// FILE: ./CMakeLists.txt
+///////////////////////////////////////////////////////////////////////////
+
+cmake_minimum_required(VERSION 3.20)
+
+# Name your entire workspace
+project(FlowEngine VERSION 1.0)
+
+# Enforce strict warning-as-error policy across all platforms
+set(CMAKE_COMPILE_WARNING_AS_ERROR ON)
+
+# Force Modern C++17
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Force Static Linking globally
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+
+# Put the final .exe in a clean bin folder
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+
+include(FetchContent)
+
+# 1. Download official SFML 3.0.0
+message(STATUS "Fetching SFML 3.0.0...")
+FetchContent_Declare(SFML
+    GIT_REPOSITORY https://github.com/SFML/SFML.git
+    GIT_TAG 3.0.0
+)
+set(SFML_BUILD_AUDIO OFF CACHE BOOL "" FORCE)
+set(SFML_BUILD_NETWORK OFF CACHE BOOL "" FORCE)
+set(SFML_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(SFML)
+
+# 2. Download Core Dear ImGui
+message(STATUS "Fetching Core ImGui...")
+FetchContent_Declare(imgui
+    GIT_REPOSITORY https://github.com/ocornut/imgui.git
+    GIT_TAG v1.91.5
+)
+FetchContent_MakeAvailable(imgui)
+set(IMGUI_DIR ${imgui_SOURCE_DIR} CACHE PATH "Core ImGui Directory" FORCE)
+
+# 3. Download ImGui-SFML bridge
+set(IMGUI_SFML_FIND_SFML OFF CACHE BOOL "" FORCE)
+message(STATUS "Fetching ImGui-SFML...")
+FetchContent_Declare(ImGui-SFML
+    GIT_REPOSITORY https://github.com/SFML/imgui-sfml.git
+    GIT_TAG master 
+)
+FetchContent_MakeAvailable(ImGui-SFML)
+
+# 4. Tell CMake to process our two sub-folders
+add_subdirectory(Flow)
+add_subdirectory(Sandbox)
+
+
+
+
+///////////////////////////////////////////////////////////////////////////
+// FILE: ./Configs/Engine.ini
+///////////////////////////////////////////////////////////////////////////
+
+[Display]
+WindowWidth=1280
+WindowHeight=720
+WindowName=FlowEngine
+FullScreen=0
+
+[Network]
+DefaultPort=7777
+MaxPlayers=4
+
+///////////////////////////////////////////////////////////////////////////
+// FILE: ./Flow/CMakeLists.txt
+///////////////////////////////////////////////////////////////////////////
+
+project(Flow)
+
+# 1. Gather all Engine source files
+set(FLOW_SOURCES
+    src/Application.cpp
+    src/Engine.cpp
+)
+
+# 2. Build the Flow Engine as a STATIC LIBRARY (.lib), not an executable
+add_library(Flow STATIC ${FLOW_SOURCES})
+
+# 3. Expose the Flow/src folder so the Sandbox can see our header files
+target_include_directories(Flow PUBLIC src)
+
+# 4. Link SFML and ImGui to the Flow Engine
+# We use PUBLIC so that the Sandbox automatically inherits these tools too!
+target_link_libraries(Flow PUBLIC 
+    SFML::Graphics 
+    SFML::Window 
+    SFML::System 
+    ImGui-SFML::ImGui-SFML
+)
+
+///////////////////////////////////////////////////////////////////////////
+// FILE: ./Flow/src/Application.cpp
+///////////////////////////////////////////////////////////////////////////
+
+#include "Application.h"
+#include <SFML/System/Clock.hpp>
+#include <SFML/System/Time.hpp> // for clock functions to work
+#include <iostream>
+#include <optional>
+
+
+namespace Flow
+{
+	Application::Application() {}
+	Application::~Application() {}
+
+	void Application::Run()
+	{
+		std::cout << "Flow [Application] Master Loop Started. \n";
+
+		// 1. Boot internal engine systems
+		EngineInstance.InitializeEngine();
+
+		// 2. Call the Sandbox's initialization hook
+		OnStart();
+
+		// Get a murable ref to the actual window
+		sf::RenderWindow& Window = EngineInstance.GetWindow();
+
+
+		// 3. Setup the Stopwatch (SFML Clock)
+		sf::Clock clock;
+		Accumulator = 0.0f;
+
+		// 4. The Infinite Master Loop
+		while (bIsApplicationRunning)
+		{
+			// SFML 3.0 c++17 Event polling . Keeps the screen active without freezing
+			// pollEvent() returns and optional event, creating it in the loop condition
+			while (const std::optional event = Window.pollEvent())
+			{
+				// Strict template checking is used (->ist<T>) instead of checking an integer type
+				if (event->is<sf::Event::Closed>())
+				{
+					bIsApplicationRunning = false;
+				}
+			}
+
+
+
+			// Get how much time passed since the exact end of the last loop
+			RealDeltaTime = clock.restart().asSeconds();
+
+			// Time since application started without accounting to lag or game pauses
+			RealElapsedTime += RealDeltaTime;  
+
+			// Delta time that adjusts itself to pause and freezes
+			GameDeltaTime = RealDeltaTime;
+
+			// Safety Clamp: If the game freezes, don't let the Accumulator explode
+			if (GameDeltaTime > 0.25f)
+			{
+				GameDeltaTime = 0.25f;
+			}
+
+			// Time since application started with accounting to lag and game pauses
+			GameElapsedTime += GameDeltaTime;
+
+			// Pour the time into the bucket
+			Accumulator += GameDeltaTime;
+
+			// The Physicist wakes up
+			while (Accumulator >= FixedTimeStep)
+			{
+				OnUpdate(FixedTimeStep); // Always passes exactly 16.66ms
+				Accumulator -= FixedTimeStep;
+			}
+
+			//..................RENDER PIPELINE............................
+
+			// 1. Wipe the old frame clean( Black bg)
+			Window.clear(sf::Color::Black);
+
+			// 2. The sandbox draws whatever state the Universe currently is in
+			Draw();
+
+			// 3. Swap the graphics buffer to physical monitor
+			Window.display();
+
+		}
+
+		// 5. Clean up once the loop breaks
+		EngineInstance.ShutdownEngine();
+		std::cout << "Flow [Application] Master Loop Terminated \n";
+	}
+}
+
+///////////////////////////////////////////////////////////////////////////
+// FILE: ./Flow/src/Application.h
+///////////////////////////////////////////////////////////////////////////
+
+#pragma once
+#include "Engine.h"
+
+namespace Flow
+{
+	class Application 
+	{
+	public:
+		Application();
+		virtual ~Application();
+
+		// Gameplay Hooks (Inversion of Control)
+		virtual void OnStart() {}
+		virtual void OnUpdate(float deltaTime) {}
+		virtual void Draw() = 0;
+
+		void Run();
+
+		float GetGameDeltaTime() const { return GameDeltaTime; }
+		float GetRealDeltaTime() const { return RealDeltaTime; }
+		float GetAccumulator() const { return Accumulator; }
+		float GetFixedTimeStep() const { return FixedTimeStep; }
+
+		double GetRealElapsedTime() const { return RealElapsedTime; }
+		double GetGameElapsedTime() const { return GameElapsedTime; }
+
+	private:
+		Engine EngineInstance;
+		bool bIsApplicationRunning = true;
+
+		float GameDeltaTime = 0.0f;
+		float RealDeltaTime = 0.0f;
+		float Accumulator = 0.0f;
+
+		double RealElapsedTime = 0;
+		double GameElapsedTime = 0;
+
+		const float FixedTimeStep = 1.0f / 60.0f; // Target: ~60 FPS (16.66ms)
+	};
+
+	// Client definition: Must be implemented by the game side
+	Application* CreateApplication();
+}
+
+///////////////////////////////////////////////////////////////////////////
+// FILE: ./Flow/src/Engine.cpp
+///////////////////////////////////////////////////////////////////////////
+
+#include "Engine.h"
+#include <iostream>
+#include <fstream> // Required for file reading
+#include <cstdint>
+
+namespace Flow
+{
+	Engine::Engine() : bIsEngineRunning(false) {}
+	
+	Engine::~Engine() {}
+
+	void Engine::LoadConfigurationFile(const std::string& FilePath)
+	{
+		std::cout << "Flow [Engine] Loading configuration from: " << FilePath << "\n";
+
+		std::ifstream File(FilePath);
+
+		if (!File.is_open())
+		{
+			std::cerr << "Flow [Engine] WARNING: Could not open " << FilePath << ". Using Engine Defaults. \n";
+			return;
+		}
+
+		std::string Line;
+
+		while(std::getline(File, Line))
+		{
+			// Skip empty lines and [Category] headers
+			if (Line.empty() || Line[0] == '[' || Line[0] == ';')
+			{
+				continue;
+			}
+			
+
+			// Find the delimiter
+			size_t DelimiterPos = Line.find('=');
+			if (DelimiterPos != std::string::npos)
+			{
+				// Extract Key and Value
+				std::string Key = Line.substr(0, DelimiterPos);
+				std::string Value = Line.substr(DelimiterPos + 1);
+
+				// Store in our fast-lookup map
+				RawConfigData[Key] = Value;
+			}
+			
+		}
+		File.close();
+		
+		// Safely map the raw string data to our strongly-typed struct;
+		if (RawConfigData.find("WindowWidth") != RawConfigData.end())
+			Config.WindowWidth = std::stoi(RawConfigData["WindowWidth"]);
+
+		if (RawConfigData.find("WindowHeight") != RawConfigData.end())
+			Config.WindowHeight = std::stoi(RawConfigData["WindowHeight"]);
+
+		if (RawConfigData.find("WindowName") != RawConfigData.end())
+			Config.WindowName = std::string(RawConfigData["WindowName"]);
+
+		if (RawConfigData.find("FullScreen") != RawConfigData.end())
+			Config.bIsFullscreen = std::stoi(RawConfigData["FullScreen"]);
+
+		if (RawConfigData.find("DefaultPort") != RawConfigData.end())
+			Config.NetworkPort = std::stoi(RawConfigData["DefaultPort"]);
+
+		if (RawConfigData.find("MaxPlayers") != RawConfigData.end())
+			Config.MaxPlayers = std::stoi(RawConfigData["MaxPlayers"]);
+
+		// --- NEW: Verbose Success Logging ---
+		std::cout << "Flow [Engine] Configuration Loaded Successfully.\n";
+		std::cout << "  -> Resolution : " << Config.WindowWidth << "x" << Config.WindowHeight << "\n";
+		std::cout << "  -> Fullscreen : " << (Config.bIsFullscreen ? "True" : "False") << "\n";
+		std::cout << "  -> Port       : " << Config.NetworkPort << "\n";
+		std::cout << "  -> Max Players: " << Config.MaxPlayers << "\n";
+		std::cout << "  -> Window Name: " << Config.WindowName << "\n";
+
+
+	}
+
+	void Engine::InitializeEngine()
+	{
+		std::cout << "Flow [Engine] Core Subsystems Initializing \n";
+
+		// 1. Load data from disk before allocating major systems
+		LoadConfigurationFile("Configs/Engine.ini");
+
+		// 2. Determine Window Style
+		sf::State WindowState = Config.bIsFullscreen ? sf::State::Fullscreen : sf::State::Windowed;
+		
+		Window.create(
+			sf::VideoMode({ Config.WindowWidth, Config.WindowHeight }),
+			Config.WindowName,
+			WindowState);
+
+		bIsEngineRunning = true;
+	}
+
+	void Engine::RunEngine()
+	{
+		// Reserved for internal engine-only ticking if necessary.
+		// Separate from the Application's gameplay loop.
+	}
+
+	void Engine::ShutdownEngine()
+	{
+		std::cout << "Flow [Engine] Core Subsystems Shutting Down....\n";
+		bIsEngineRunning = false;
+	}
+}
+
+///////////////////////////////////////////////////////////////////////////
+// FILE: ./Flow/src/Engine.h
+///////////////////////////////////////////////////////////////////////////
+
+#pragma once
+#include <SFML/Graphics.hpp>
+#include <string>
+#include <unordered_map>
+
+namespace Flow 
+{
+	// A clean struct to hold cached configurations
+	struct EngineConfig
+	{
+		
+		// Values set in Engine.ini will override these 
+
+		// Fallback defaults
+		unsigned int WindowWidth = 800; 
+		unsigned int WindowHeight = 600;
+		std::string WindowName = "Engine Name Fallback";
+		bool bIsFullscreen = false;
+
+		unsigned int NetworkPort = 7777;
+		unsigned int MaxPlayers = 1;
+	};
+
+
+	class Engine
+	{
+	public:
+		Engine();
+		~Engine();
+
+		void InitializeEngine();
+		void RunEngine();
+		void ShutdownEngine();
+
+		// Returns a mutable reference to the Engine's window.
+		// The Application may call drawing functions, but the Engine retains sole memory ownership.
+		sf::RenderWindow& GetWindow() { return Window; }
+
+		bool IsRunning() const { return bIsEngineRunning; }
+		void Stop() { bIsEngineRunning = false; }
+
+	private:
+
+		
+		// Canvas
+		sf::RenderWindow Window;
+
+		bool bIsEngineRunning = false;
+		
+		// Loading Engine Congiguration...................................
+
+		EngineConfig Config;
+
+		// Internal helper to parse the file
+		void LoadConfigurationFile(const std::string& FilePath);
+
+		// Raw Dictionary of all parsed ini keys
+		std::unordered_map<std::string, std::string> RawConfigData;
+
+	};
+}
+
+///////////////////////////////////////////////////////////////////////////
+// FILE: ./Flow/src/EntryPoint.h
+///////////////////////////////////////////////////////////////////////////
+
+#pragma once
+#include "Application.h"
+#include <iostream>
+
+extern Flow::Application* Flow::CreateApplication();
+
+int main(int argc, char** argv)
+{
+	std::cout << "Flow Engine | Booting System Architecture........\n";
+
+	// The engine instantiates the client game application dynamically via the link hook
+	auto app = Flow::CreateApplication();
+
+	// The engine takes complete control over execution (Inversion of Control)
+	app->Run();
+
+	// Clean up when the engine terminates
+	delete app;
+
+	std::cout << "Flow Engine Shutdown Complete.\n";
+}
+
+///////////////////////////////////////////////////////////////////////////
+// FILE: ./Sandbox/CMakeLists.txt
+///////////////////////////////////////////////////////////////////////////
+
+project(Sandbox)
+
+# 1. Gather the Sandbox source code
+set(SANDBOX_SOURCES
+    src/SandboxApp.cpp
+)
+
+# 2. Build the Sandbox as the actual EXECUTABLE (.exe)
+add_executable(Sandbox ${SANDBOX_SOURCES})
+
+# 3. Link the Flow Engine directly into the Sandbox
+target_link_libraries(Sandbox PRIVATE Flow)
+
+# 4. Automate Asset Deployment
+add_custom_command(TARGET Sandbox POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_SOURCE_DIR}/Configs
+    $<TARGET_FILE_DIR:Sandbox>/Configs
+    COMMENT "Copying Configs folder to the exact binary directory..."
+)
+
+///////////////////////////////////////////////////////////////////////////
+// FILE: ./Sandbox/src/SandboxApp.cpp
+///////////////////////////////////////////////////////////////////////////
+
+#include "Application.h"
+#include "EntryPoint.h"
+
+class Sandbox : public Flow::Application
+{
+public:
+	Sandbox() {}
+	~Sandbox() {}
+
+	virtual void OnStart() override
+	{
+		// Initialize your game objects here
+	}
+
+	virtual void OnUpdate(float DeltTime) override
+	{
+		// Your gameplay logic that gets updated every frame
+	}
+
+	virtual void Draw()
+	{
+		// Your gameplay logic that gets updated every frame
+	}
+};
+
+// Define the allocation implementation that EntryPoint.h Calls into
+Flow::Application* Flow::CreateApplication()
+{
+	return new Sandbox();
+}
+
+///////////////////////////////////////////////////////////////////////////
+// FILE: ./Utils/IniParser.cpp
+///////////////////////////////////////////////////////////////////////////
+
+
+
+///////////////////////////////////////////////////////////////////////////
+// FILE: ./Utils/IniParser.h
+///////////////////////////////////////////////////////////////////////////
+
+
+
+===========================================================================
+PRUNED PROJECT HIERARCHY (ENGINE CORE ONLY)
+===========================================================================
+
+.
+├── Configs
+│   └── Engine.ini
+├── Flow
+│   ├── src
+│   │   ├── Application.cpp
+│   │   ├── Application.h
+│   │   ├── Engine.cpp
+│   │   ├── Engine.h
+│   │   └── EntryPoint.h
+│   └── CMakeLists.txt
+├── Sandbox
+│   ├── src
+│   │   └── SandboxApp.cpp
+│   └── CMakeLists.txt
+├── Utils
+│   ├── IniParser.cpp
+│   └── IniParser.h
+├── Bundler.py
+└── CMakeLists.txt
