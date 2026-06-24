@@ -31,6 +31,8 @@ namespace Flow
 		// 4. The Infinite Master Loop
 		while (bIsApplicationRunning)
 		{
+			// -- Input Phase 1 --.....................................................
+
 			// SFML 3.0 c++17 Event polling . Keeps the screen active without freezing
 			// pollEvent() returns and optional event, creating it in the loop condition
 			while (const std::optional event = Window.pollEvent())
@@ -40,9 +42,18 @@ namespace Flow
 				{
 					bIsApplicationRunning = false;
 				}
+
+				// Dereference the optional event (*event) and pass it to the Input Manager
+				EngineInstance.GetInputManager().ProcessEvent(*event);
 			}
 
+			// -- Input Phase 2 --
+			// Continous Hardware Sweep
 
+			// Must happen exaclty once per frame, immediately after polling OS events
+			EngineInstance.GetInputManager().UpdateContinousStates();
+
+			// Delat Time and Physics Accumulator logic................................
 
 			// Get how much time passed since the exact end of the last loop
 			RealDeltaTime = clock.restart().asSeconds();
@@ -82,6 +93,28 @@ namespace Flow
 
 			// 3. Swap the graphics buffer to physical monitor
 			Window.display();
+
+			// ---------------------------------------------------------
+			// DIAGNOSTIC TEST: Read the buffer before it clears
+			// ---------------------------------------------------------
+			for (const auto& action : EngineInstance.GetInputManager().GetFrameActions())
+			{
+				std::string StateString;
+				if (action.State == Flow::ActionState::Pressed) StateString = "PRESSED";
+				else if (action.State == Flow::ActionState::Held) StateString = "HELD";
+				else if (action.State == Flow::ActionState::Released) StateString = "RELEASED";
+
+				std::cout << "[INPUT] Player: " << action.PlayerIndex
+					<< " | ActionID: " << action.ActionID
+					<< " | State: " << StateString << "\n";
+			}
+			// ---------------------------------------------------------
+
+			// --- INPUT PHASE 3 ---
+			// Flush the buffer
+			// Must happen at the exact end of the frame, after everything is drawn.
+			// If you forget this, the Sandbox will process the same "Shoot" command forever.
+			EngineInstance.GetInputManager().ClearFrame();
 
 		}
 

@@ -1,6 +1,7 @@
 #pragma once
 #include <SFML/Graphics.hpp>
 #include "ConfigManager.h"
+#include "Input/InputManager.h"
 
 
 namespace Flow 
@@ -20,11 +21,15 @@ namespace Flow
 		// The Application may call drawing functions, but the Engine retains sole memory ownership.
 		sf::RenderWindow& GetWindow() { return Window; }
 
+		InputManager& GetInputManager() { return InputSys; }
+
 		bool IsRunning() const { return bIsEngineRunning; }
 		void Stop() { bIsEngineRunning = false; }
 
 	private:
 
+		// 3. Engine permanently owns input Manager in RAM
+		InputManager InputSys;
 
 		// Engine Status
 		bool bIsEngineRunning = false;

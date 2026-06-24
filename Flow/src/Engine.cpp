@@ -18,6 +18,18 @@ namespace Flow
         LoadConfiguration();
         BootWindow();
 
+        // ---------------------------------------------------------
+        // DIAGNOSTIC TEST BINDINGS (SFML 3.0 STANDARD)
+        // ---------------------------------------------------------
+        // Player 0 (Pilot 1)
+        InputSys.BindKey(sf::Keyboard::Key::W, Flow::HashString("P1_THRUST"), 0);
+        InputSys.BindKey(sf::Keyboard::Key::Space, Flow::HashString("P1_SHOOT"), 0);
+
+        // Player 1 (Pilot 2)
+        InputSys.BindKey(sf::Keyboard::Key::Up, Flow::HashString("P2_THRUST"), 1);
+        InputSys.BindKey(sf::Keyboard::Key::Enter, Flow::HashString("P2_SHOOT"), 1);
+        // ---------------------------------------------------------
+
         bIsEngineRunning = true;
     }
 
