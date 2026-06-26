@@ -1,92 +1,83 @@
 #include "Input/InputManager.h"
+#include "Utils/Log.h"
 
 namespace Flow
 {
-	InputManager::InputManager()
-	{
+	InputManager::InputManager() {}
+	InputManager::~InputManager() {}
 
+	void InputManager::PushContext(InputContext* Context)
+	{
+		if (Context)
+		{
+			ContextStack.push_back(Context);
+			FLOW_LOG_INFO("InputManager: Pushed Context '" + Context->GetName() + "' to stack.");
+		}
 	}
 
-	InputManager::~InputManager()
+	void InputManager::PopContext()
 	{
-
-	}
-
-	void InputManager::BindKey(sf::Keyboard::Key PhysicalKey, uint32_t ActionID, int PlayerIndex)
-	{
-		// Store the binding in our dictionary
-		KeyBindings[PhysicalKey] = { ActionID, PlayerIndex };
-
-		// Initialize its tracking state to false
-		KeyStates[PhysicalKey] = false;
-
+		if (!ContextStack.empty())
+		{
+			FLOW_LOG_INFO("InputManager: Popped Context '" + ContextStack.back()->GetName() + "' from stack.");
+			ContextStack.pop_back();
+		}
 	}
 
 	void InputManager::ProcessEvent(const sf::Event& event)
 	{
-		// SFML 3.0 STANDARD: Type-safe event extraction using getIf<T>()
-
 		// 1. Check for a Key Press
 		if (const auto* KeyPressed = event.getIf<sf::Event::KeyPressed>())
 		{
-			// Does this key exist in our dictioneary?
-			auto it = KeyBindings.find(KeyPressed->code);
-			if (it != KeyBindings.end())
+			// Read the stack backwards (Top to Bottom)
+			for (auto it = ContextStack.rbegin(); it != ContextStack.rend(); ++it)
 			{
-			    // Prevent the OS from spamming "Pressed" if the user holds the key down
-				if (!KeyStates[KeyPressed->code])
+				// Does THIS context care about the key?
+				if (auto Binding = (*it)->GetBinding(KeyPressed->code))
 				{
-					KeyStates[KeyPressed->code] = true; // Mark as currently down
-
-					// Push a pure data packed to the Sandbox
-					ActionBuffer.push_back({
-						it->second.ActionID,
-						it->second.PlayerIndex,
-						ActionState::Pressed,
-						1.0f
-						});
+					if (!KeyStates[KeyPressed->code])
+					{
+						KeyStates[KeyPressed->code] = true;
+						ActionBuffer.push_back({ Binding->ActionID, Binding->PlayerIndex, ActionState::Pressed, 1.0f });
+					}
+					break; // CONSUMED! Stop looking at lower contexts.
 				}
-
 			}
 		}
-
 		// 2. Check for a Key Release
 		else if (const auto* KeyReleased = event.getIf<sf::Event::KeyReleased>())
 		{
-			auto it = KeyBindings.find(KeyReleased->code);
-			if (it != KeyBindings.end())
+			for (auto it = ContextStack.rbegin(); it != ContextStack.rend(); ++it)
 			{
-				KeyStates[KeyReleased->code] = false; // Mark as released
-
-				ActionBuffer.push_back({
-					it->second.ActionID,
-					it->second.PlayerIndex,
-					ActionState::Released,
-					0.0f
-					});
+				if (auto Binding = (*it)->GetBinding(KeyReleased->code))
+				{
+					KeyStates[KeyReleased->code] = false;
+					ActionBuffer.push_back({ Binding->ActionID, Binding->PlayerIndex, ActionState::Released, 0.0f });
+					break; // CONSUMED!
+				}
 			}
 		}
-
 	}
 
 	void InputManager::UpdateContinousStates()
 	{
-		// Loop through every keys that we care about in the dictionary
-		for (const auto& [PhysicalKey, Binding] : KeyBindings)
+		// Temporary map to ensure a key isn't processed twice in the same frame by different contexts
+		std::unordered_map<sf::Keyboard::Key, bool> ProcessedKeys;
+
+		for (auto it = ContextStack.rbegin(); it != ContextStack.rend(); ++it)
 		{
-			// SFML 3.0 Direct Hardware Polling
-			if (sf::Keyboard::isKeyPressed(PhysicalKey))
+			for (const auto& [PhysicalKey, Binding] : (*it)->GetBindings())
 			{
-				// We only generate a "Held" action if the state is recorded as true
-				// (Meaning it succesfully passed through the Pressed Phase first)
-				if (KeyStates[PhysicalKey])
+				// If a higher context already ate this key, skip it
+				if (ProcessedKeys[PhysicalKey]) continue;
+
+				if (sf::Keyboard::isKeyPressed(PhysicalKey))
 				{
-					ActionBuffer.push_back({
-						Binding.ActionID,
-						Binding.PlayerIndex,
-						ActionState::Held,
-						1.0f
-						});
+					if (KeyStates[PhysicalKey])
+					{
+						ActionBuffer.push_back({ Binding.ActionID, Binding.PlayerIndex, ActionState::Held, 1.0f });
+					}
+					ProcessedKeys[PhysicalKey] = true; // Mark as eaten
 				}
 			}
 		}
@@ -94,7 +85,6 @@ namespace Flow
 
 	void InputManager::ClearFrame()
 	{
-		// Wipe the array so the sandbox doesn't process the same actions twice
 		ActionBuffer.clear();
 	}
 }

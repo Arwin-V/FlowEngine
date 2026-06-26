@@ -3,6 +3,7 @@
 #include <unordered_map>
 #include <functional>
 #include <type_traits> // Required for compile-time type checking
+#include "Input/InputContext.h"
 
 namespace Flow
 {
@@ -30,6 +31,9 @@ namespace Flow
 		// Allows the Engine to read the final variables safely
 		const EngineConfig& GetConfig() const { return Config; }
 
+		// 2. Engine to grab the finished profiles
+		std::unordered_map<std::string, InputContext>& GetInputContexts() { return InputContexts;  }
+
 	private:
 
 		EngineConfig Config;
@@ -47,6 +51,9 @@ namespace Flow
 		This evaluates the type of 'T' at compile-time. The compiler will completely delete
 		the 'if' branches that don't match, resulting in blazingly fast, zero-overhead type conversion.
 		*/
+
+		// Storage for automatically generated profiles
+		std::unordered_map<std::string, InputContext> InputContexts;
 
 		template <typename T>
 		void RegisterProperty(const std::string& KeyName, T& VariableToBind)

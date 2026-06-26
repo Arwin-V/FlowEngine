@@ -4,7 +4,8 @@
 #include <unordered_map>
 #include <vector>
 #include "Input/InputTypes.h"
-#include "Input/StringHash.h"
+#include "Input/InputContext.h" // Added Context Header
+
 
 
 
@@ -16,46 +17,32 @@ namespace Flow
 		InputManager();
 		~InputManager();
 
+		// -------------------------------------------------------------------
+		// 1. Stack Management (The Context Plates)
+		// -------------------------------------------------------------------
 
-		// 1. Setup & Configuration (Called during game boot).............................
-	
-		// Maps a physical keyboard button to an abstract hashed string ID
-		void BindKey(sf::Keyboard::Key PhysicalKey, uint32_t ActionID, int PlayerIndex = 0);
+		// Adds a context to the TOP of the stack
+		void PushContext(InputContext* Context);
 
-		// 2. The Core Engine Loop Hook (Called every frame).............................
+		// Removes the top context (e.g., closing the pause menu)
+		void PopContext();
 
-		// Catches discrete events from the OS (Just Pressed, Just Released)
+		// -------------------------------------------------------------------
+		// 2. The Core Engine Loop Hook
+		// -------------------------------------------------------------------
 		void ProcessEvent(const sf::Event& event);
-
-		// Sweeps the hardware for continuous data (held buttons, Analog Sticks)
 		void UpdateContinousStates();
-
-		// Clears the buffer at the exact end of a frame so actions don't repeat
 		void ClearFrame();
 
-
-		// 3. The API for Layer 2 (Application) and Layer 3 (Sandbox).....................
-
-		// Returns the raw list of everything that happened this exact frame
 		const std::vector<GameAction>& GetFrameActions() const { return ActionBuffer; }
 
 	private:
-		// The Data Pipeline : A contigious array of actions generated this frame
-		std::vector <GameAction> ActionBuffer;
+		std::vector<GameAction> ActionBuffer;
 
-		// The Dictionary: Maps [Physical Key] -> [ActionID, PlayerIndex]
-		// Using a struct for the map value keeps the memory tightly packed
-		struct BindingData
-		{
-			uint32_t ActionID;
-			int PlayerIndex;
-		};
-		
-		std::unordered_map<sf::Keyboard::Key, BindingData> KeyBindings;
+		// THE STACK: Index 0 is the bottom (Gameplay), Index N is the top (UI Menu)
+		std::vector<InputContext*> ContextStack;
 
-		// Tracks which actions are currently held down (to prevent spamming "Just Pressed" events)
+		// Tracks physical hardware state to prevent OS spamming (This remains global)
 		std::unordered_map<sf::Keyboard::Key, bool> KeyStates;
-		
-		
-	}; 
+	};
 }

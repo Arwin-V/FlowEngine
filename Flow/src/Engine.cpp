@@ -19,18 +19,23 @@ namespace Flow
         BootWindow();
 
         // ---------------------------------------------------------
-        // DIAGNOSTIC TEST BINDINGS (SFML 3.0 STANDARD)
+        // Activate the Default Input Context
         // ---------------------------------------------------------
-        // Player 0 (Pilot 1)
-        InputSys.BindKey(sf::Keyboard::Key::W, Flow::HashString("P1_THRUST"), 0);
-        InputSys.BindKey(sf::Keyboard::Key::Space, Flow::HashString("P1_SHOOT"), 0);
+        auto& LoadedContexts = ConfigSys.GetInputContexts();
 
-        // Player 1 (Pilot 2)
-        InputSys.BindKey(sf::Keyboard::Key::Up, Flow::HashString("P2_THRUST"), 1);
-        InputSys.BindKey(sf::Keyboard::Key::Enter, Flow::HashString("P2_SHOOT"), 1);
+        // Ensure the "Gameplay" context was actually found in the INI file
+        if (LoadedContexts.find("Gameplay") != LoadedContexts.end())
+        {
+            // Pass the memory address of the Gameplay context to the top of the stack
+            InputSys.PushContext(&LoadedContexts.at("Gameplay"));
+        }
+        else
+        {
+            std::cerr << "Flow [Engine] WARNING: 'Gameplay' Input Context missing from Engine.ini!\n";
+        }
         // ---------------------------------------------------------
 
-        bIsEngineRunning = true;
+               bIsEngineRunning = true;
     }
 
     void Engine::LoadConfiguration()
