@@ -1,9 +1,9 @@
 =======================================================================
                   PROJECT CONTEXT & METADATA OVERVIEW                  
 =======================================================================
-Generated On : 2026-06-26 16:25:09
-Files Parsed : 19
-Total Lines  : 883
+Generated On : 2026-06-27 04:15:57
+Files Parsed : 23
+Total Lines  : 1090
 =======================================================================
 
 
@@ -60,10 +60,20 @@ FetchContent_Declare(ImGui-SFML
 )
 FetchContent_MakeAvailable(ImGui-SFML)
 
-# 4. Tell CMake to process our two sub-folders
+# ---------------------------------------------------------
+# 4. Download EnTT (Entity Component System)
+# ---------------------------------------------------------
+message(STATUS "Fetching EnTT 3.13.0...")
+FetchContent_Declare(entt
+    GIT_REPOSITORY https://github.com/skypjack/entt.git
+    GIT_TAG v3.13.0
+)
+FetchContent_MakeAvailable(entt)
+# ---------------------------------------------------------
+
+# 5. Tell CMake to process our two sub-folders
 add_subdirectory(Flow)
 add_subdirectory(Sandbox)
-
 
 
 
@@ -112,7 +122,7 @@ set(FLOW_SOURCES
 )
 
 # 2. Build the Flow Engine as a STATIC LIBRARY (.lib), not an executable
-add_library(Flow STATIC ${FLOW_SOURCES} "src/ConfigManager.h" "src/Utils/ConfigManager.cpp" "src/Utils/Log.h" "src/Input/StringHash.h" "src/Input/InputTypes.h" "src/Input/InputManager.h" "src/Input/InputManager.cpp")
+add_library(Flow STATIC ${FLOW_SOURCES} "src/ConfigManager.h" "src/Utils/ConfigManager.cpp" "src/Utils/Log.h" "src/Input/StringHash.h" "src/Input/InputTypes.h" "src/Input/InputManager.h" "src/Input/InputManager.cpp" "src/Input/KeyMapper.h" "src/Input/KeyMapper.cpp" "src/Input/InputContext.h" "src/Utils/DebugOverlay.h")
 
 # 3. Expose the Flow/src folder so the Sandbox can see our header files
 target_include_directories(Flow PUBLIC src)
@@ -124,6 +134,7 @@ target_link_libraries(Flow PUBLIC
     SFML::Window 
     SFML::System 
     ImGui-SFML::ImGui-SFML
+    EnTT::EnTT
 )
 
 ///////////////////////////////////////////////////////////////////////////
@@ -313,6 +324,7 @@ namespace Flow
 #include <unordered_map>
 #include <functional>
 #include <type_traits> // Required for compile-time type checking
+#include "Input/InputContext.h"
 
 namespace Flow
 {
@@ -340,6 +352,9 @@ namespace Flow
 		// Allows the Engine to read the final variables safely
 		const EngineConfig& GetConfig() const { return Config; }
 
+		// 2. Engine to grab the finished profiles
+		std::unordered_map<std::string, InputContext>& GetInputContexts() { return InputContexts;  }
+
 	private:
 
 		EngineConfig Config;
@@ -357,6 +372,9 @@ namespace Flow
 		This evaluates the type of 'T' at compile-time. The compiler will completely delete
 		the 'if' branches that don't match, resulting in blazingly fast, zero-overhead type conversion.
 		*/
+
+		// Storage for automatically generated profiles
+		std::unordered_map<std::string, InputContext> InputContexts;
 
 		template <typename T>
 		void RegisterProperty(const std::string& KeyName, T& VariableToBind)
@@ -411,18 +429,23 @@ namespace Flow
         BootWindow();
 
         // ---------------------------------------------------------
-        // DIAGNOSTIC TEST BINDINGS (SFML 3.0 STANDARD)
+        // Activate the Default Input Context
         // ---------------------------------------------------------
-        // Player 0 (Pilot 1)
-        InputSys.BindKey(sf::Keyboard::Key::W, Flow::HashString("P1_THRUST"), 0);
-        InputSys.BindKey(sf::Keyboard::Key::Space, Flow::HashString("P1_SHOOT"), 0);
+        auto& LoadedContexts = ConfigSys.GetInputContexts();
 
-        // Player 1 (Pilot 2)
-        InputSys.BindKey(sf::Keyboard::Key::Up, Flow::HashString("P2_THRUST"), 1);
-        InputSys.BindKey(sf::Keyboard::Key::Enter, Flow::HashString("P2_SHOOT"), 1);
+        // Ensure the "Gameplay" context was actually found in the INI file
+        if (LoadedContexts.find("Gameplay") != LoadedContexts.end())
+        {
+            // Pass the memory address of the Gameplay context to the top of the stack
+            InputSys.PushContext(&LoadedContexts.at("Gameplay"));
+        }
+        else
+        {
+            std::cerr << "Flow [Engine] WARNING: 'Gameplay' Input Context missing from Engine.ini!\n";
+        }
         // ---------------------------------------------------------
 
-        bIsEngineRunning = true;
+               bIsEngineRunning = true;
     }
 
     void Engine::LoadConfiguration()
@@ -542,98 +565,144 @@ int main(int argc, char** argv)
 }
 
 ///////////////////////////////////////////////////////////////////////////
+// FILE: ./Flow/src/Input/InputContext.h
+///////////////////////////////////////////////////////////////////////////
+
+#pragma once
+#include <SFML/Window/Keyboard.hpp>
+#include <unordered_map>
+#include <string>
+#include <optional>
+#include "Input/InputTypes.h"
+
+namespace Flow
+{
+	// Using a struct for the map value keeps the memory tightly packed
+	struct BindingData
+	{
+		uint32_t ActionID;
+		int PlayerIndex;
+	};
+
+	class InputContext
+	{
+	public:
+		InputContext(const std::string& Name) : ContextName(Name) {}
+
+		// Registers a physical key to an action for this specific profile
+		void BindKey(sf::Keyboard::Key PhysicalKey, uint32_t ActionID, int PlayerIndex = 0)
+		{
+			KeyBindings[PhysicalKey] = { ActionID, PlayerIndex };
+		}
+
+		// Allows the Engine to ask: "Does this specific profile care about the 'W' key?"
+		std::optional<BindingData> GetBinding(sf::Keyboard::Key PhysicalKey) const
+		{
+			auto it = KeyBindings.find(PhysicalKey);
+			if (it != KeyBindings.end())
+			{
+				return it->second;
+			}
+			return std::nullopt; // C++17 safe way to return "nothing found"
+		}
+
+		const std::string& GetName() const { return ContextName; }
+
+		// Allows the InputManager to sweep all keys in this specific context
+		const std::unordered_map<sf::Keyboard::Key, BindingData>& GetBindings() const { return KeyBindings; }
+
+	private:
+		std::string ContextName;
+
+		// This context's personal dictionary of hardware keys
+		std::unordered_map<sf::Keyboard::Key, BindingData> KeyBindings;
+	};
+}
+
+///////////////////////////////////////////////////////////////////////////
 // FILE: ./Flow/src/Input/InputManager.cpp
 ///////////////////////////////////////////////////////////////////////////
 
 #include "Input/InputManager.h"
+#include "Utils/Log.h"
 
 namespace Flow
 {
-	InputManager::InputManager()
-	{
+	InputManager::InputManager() {}
+	InputManager::~InputManager() {}
 
+	void InputManager::PushContext(InputContext* Context)
+	{
+		if (Context)
+		{
+			ContextStack.push_back(Context);
+			FLOW_LOG_INFO("InputManager: Pushed Context '" + Context->GetName() + "' to stack.");
+		}
 	}
 
-	InputManager::~InputManager()
+	void InputManager::PopContext()
 	{
-
-	}
-
-	void InputManager::BindKey(sf::Keyboard::Key PhysicalKey, uint32_t ActionID, int PlayerIndex)
-	{
-		// Store the binding in our dictionary
-		KeyBindings[PhysicalKey] = { ActionID, PlayerIndex };
-
-		// Initialize its tracking state to false
-		KeyStates[PhysicalKey] = false;
-
+		if (!ContextStack.empty())
+		{
+			FLOW_LOG_INFO("InputManager: Popped Context '" + ContextStack.back()->GetName() + "' from stack.");
+			ContextStack.pop_back();
+		}
 	}
 
 	void InputManager::ProcessEvent(const sf::Event& event)
 	{
-		// SFML 3.0 STANDARD: Type-safe event extraction using getIf<T>()
-
 		// 1. Check for a Key Press
 		if (const auto* KeyPressed = event.getIf<sf::Event::KeyPressed>())
 		{
-			// Does this key exist in our dictioneary?
-			auto it = KeyBindings.find(KeyPressed->code);
-			if (it != KeyBindings.end())
+			// Read the stack backwards (Top to Bottom)
+			for (auto it = ContextStack.rbegin(); it != ContextStack.rend(); ++it)
 			{
-			    // Prevent the OS from spamming "Pressed" if the user holds the key down
-				if (!KeyStates[KeyPressed->code])
+				// Does THIS context care about the key?
+				if (auto Binding = (*it)->GetBinding(KeyPressed->code))
 				{
-					KeyStates[KeyPressed->code] = true; // Mark as currently down
-
-					// Push a pure data packed to the Sandbox
-					ActionBuffer.push_back({
-						it->second.ActionID,
-						it->second.PlayerIndex,
-						ActionState::Pressed,
-						1.0f
-						});
+					if (!KeyStates[KeyPressed->code])
+					{
+						KeyStates[KeyPressed->code] = true;
+						ActionBuffer.push_back({ Binding->ActionID, Binding->PlayerIndex, ActionState::Pressed, 1.0f });
+					}
+					break; // CONSUMED! Stop looking at lower contexts.
 				}
-
 			}
 		}
-
 		// 2. Check for a Key Release
 		else if (const auto* KeyReleased = event.getIf<sf::Event::KeyReleased>())
 		{
-			auto it = KeyBindings.find(KeyReleased->code);
-			if (it != KeyBindings.end())
+			for (auto it = ContextStack.rbegin(); it != ContextStack.rend(); ++it)
 			{
-				KeyStates[KeyReleased->code] = false; // Mark as released
-
-				ActionBuffer.push_back({
-					it->second.ActionID,
-					it->second.PlayerIndex,
-					ActionState::Released,
-					0.0f
-					});
+				if (auto Binding = (*it)->GetBinding(KeyReleased->code))
+				{
+					KeyStates[KeyReleased->code] = false;
+					ActionBuffer.push_back({ Binding->ActionID, Binding->PlayerIndex, ActionState::Released, 0.0f });
+					break; // CONSUMED!
+				}
 			}
 		}
-
 	}
 
 	void InputManager::UpdateContinousStates()
 	{
-		// Loop through every keys that we care about in the dictionary
-		for (const auto& [PhysicalKey, Binding] : KeyBindings)
+		// Temporary map to ensure a key isn't processed twice in the same frame by different contexts
+		std::unordered_map<sf::Keyboard::Key, bool> ProcessedKeys;
+
+		for (auto it = ContextStack.rbegin(); it != ContextStack.rend(); ++it)
 		{
-			// SFML 3.0 Direct Hardware Polling
-			if (sf::Keyboard::isKeyPressed(PhysicalKey))
+			for (const auto& [PhysicalKey, Binding] : (*it)->GetBindings())
 			{
-				// We only generate a "Held" action if the state is recorded as true
-				// (Meaning it succesfully passed through the Pressed Phase first)
-				if (KeyStates[PhysicalKey])
+				// If a higher context already ate this key, skip it
+				if (ProcessedKeys[PhysicalKey]) continue;
+
+				if (sf::Keyboard::isKeyPressed(PhysicalKey))
 				{
-					ActionBuffer.push_back({
-						Binding.ActionID,
-						Binding.PlayerIndex,
-						ActionState::Held,
-						1.0f
-						});
+					if (KeyStates[PhysicalKey])
+					{
+						ActionBuffer.push_back({ Binding.ActionID, Binding.PlayerIndex, ActionState::Held, 1.0f });
+					}
+					ProcessedKeys[PhysicalKey] = true; // Mark as eaten
 				}
 			}
 		}
@@ -641,7 +710,6 @@ namespace Flow
 
 	void InputManager::ClearFrame()
 	{
-		// Wipe the array so the sandbox doesn't process the same actions twice
 		ActionBuffer.clear();
 	}
 }
@@ -656,7 +724,8 @@ namespace Flow
 #include <unordered_map>
 #include <vector>
 #include "Input/InputTypes.h"
-#include "Input/StringHash.h"
+#include "Input/InputContext.h" // Added Context Header
+
 
 
 
@@ -668,48 +737,34 @@ namespace Flow
 		InputManager();
 		~InputManager();
 
+		// -------------------------------------------------------------------
+		// 1. Stack Management (The Context Plates)
+		// -------------------------------------------------------------------
 
-		// 1. Setup & Configuration (Called during game boot).............................
-	
-		// Maps a physical keyboard button to an abstract hashed string ID
-		void BindKey(sf::Keyboard::Key PhysicalKey, uint32_t ActionID, int PlayerIndex = 0);
+		// Adds a context to the TOP of the stack
+		void PushContext(InputContext* Context);
 
-		// 2. The Core Engine Loop Hook (Called every frame).............................
+		// Removes the top context (e.g., closing the pause menu)
+		void PopContext();
 
-		// Catches discrete events from the OS (Just Pressed, Just Released)
+		// -------------------------------------------------------------------
+		// 2. The Core Engine Loop Hook
+		// -------------------------------------------------------------------
 		void ProcessEvent(const sf::Event& event);
-
-		// Sweeps the hardware for continuous data (held buttons, Analog Sticks)
 		void UpdateContinousStates();
-
-		// Clears the buffer at the exact end of a frame so actions don't repeat
 		void ClearFrame();
 
-
-		// 3. The API for Layer 2 (Application) and Layer 3 (Sandbox).....................
-
-		// Returns the raw list of everything that happened this exact frame
 		const std::vector<GameAction>& GetFrameActions() const { return ActionBuffer; }
 
 	private:
-		// The Data Pipeline : A contigious array of actions generated this frame
-		std::vector <GameAction> ActionBuffer;
+		std::vector<GameAction> ActionBuffer;
 
-		// The Dictionary: Maps [Physical Key] -> [ActionID, PlayerIndex]
-		// Using a struct for the map value keeps the memory tightly packed
-		struct BindingData
-		{
-			uint32_t ActionID;
-			int PlayerIndex;
-		};
-		
-		std::unordered_map<sf::Keyboard::Key, BindingData> KeyBindings;
+		// THE STACK: Index 0 is the bottom (Gameplay), Index N is the top (UI Menu)
+		std::vector<InputContext*> ContextStack;
 
-		// Tracks which actions are currently held down (to prevent spamming "Just Pressed" events)
+		// Tracks physical hardware state to prevent OS spamming (This remains global)
 		std::unordered_map<sf::Keyboard::Key, bool> KeyStates;
-		
-		
-	}; 
+	};
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -740,6 +795,63 @@ namespace Flow
 }
 
 ///////////////////////////////////////////////////////////////////////////
+// FILE: ./Flow/src/Input/KeyMapper.cpp
+///////////////////////////////////////////////////////////////////////////
+
+#include "Input/KeyMapper.h"
+#include <unordered_map>
+#include "Utils/Log.h"
+
+namespace Flow
+{
+	sf::Keyboard::Key KeyMapper::GetKeyFromString(const std::string& KeyName)
+	{
+		// A static map ensures this dictionary is only created in memory once, not every time we call the function.
+		static const std::unordered_map<std::string, sf::Keyboard::Key> KeyMap = {
+			{"W", sf::Keyboard::Key::W},
+			{"A", sf::Keyboard::Key::A},
+			{"S", sf::Keyboard::Key::S},
+			{"D", sf::Keyboard::Key::D},
+			{"Up", sf::Keyboard::Key::Up},
+			{"Down", sf::Keyboard::Key::Down},
+			{"Left", sf::Keyboard::Key::Left},
+			{"Right", sf::Keyboard::Key::Right},
+			{"Space", sf::Keyboard::Key::Space},
+			{"Enter", sf::Keyboard::Key::Enter},
+			{"Escape", sf::Keyboard::Key::Escape}
+		};
+
+		auto it = KeyMap.find(KeyName);
+		if (it != KeyMap.end())
+		{
+			return it->second;
+		}
+
+		// If the user types "Shoot=Banana" in the INI, this catches it safely.
+		FLOW_LOG_WARN("KeyMapper: Unknown key string '" + KeyName + "'. Defaulting to Unknown.");
+		return sf::Keyboard::Key::Unknown;
+	}
+}
+
+///////////////////////////////////////////////////////////////////////////
+// FILE: ./Flow/src/Input/KeyMapper.h
+///////////////////////////////////////////////////////////////////////////
+
+#pragma once
+#include <SFML/Window/Keyboard.hpp>
+#include <string>
+
+namespace Flow
+{
+	class KeyMapper
+	{
+	public:
+		/// Converts a string like "Space" to sf::Keyboard::Key::Space
+		static sf::Keyboard::Key GetKeyFromString(const std::string& KeyName);
+	};
+}
+
+///////////////////////////////////////////////////////////////////////////
 // FILE: ./Flow/src/Input/StringHash.h
 ///////////////////////////////////////////////////////////////////////////
 
@@ -765,6 +877,8 @@ namespace Flow
 #include "ConfigManager.h"
 #include "Utils/IniParser.h"
 #include <iostream>
+#include "Input/KeyMapper.h"   
+#include "Input/StringHash.h"
 
 
 
@@ -790,6 +904,44 @@ namespace Flow
 		// Loop through every line found in the file
 		for (const auto& [Key, Value] : RawData)
 		{
+
+			// ---------------------------------------------------------
+			// Intercept Input Bindings (Look for the '.')
+			// ---------------------------------------------------------
+			size_t DotPos = Key.find('.');
+			if (DotPos != std::string::npos)
+			{
+				std::string ContextName = Key.substr(0, DotPos);
+				std::string ActionName = Key.substr(DotPos + 1);
+
+				// If this context doesn't exist yet, create it
+				if (InputContexts.find(ContextName) == InputContexts.end())
+				{
+					InputContexts.emplace(ContextName, InputContext(ContextName));
+				}
+
+				// 1. Translate string to hardware key
+				sf::Keyboard::Key PhysKey = KeyMapper::GetKeyFromString(Value);
+
+				// 2. Hash the action name (Runtime hashing!)
+				uint32_t ActionID = HashString(ActionName.c_str());
+
+				// 3. Extract Player Index automatically based on our "P1_", "P2_" prefix
+				int PlayerIndex = 0;
+				if (ActionName.substr(0, 3) == "P2_") PlayerIndex = 1;
+				else if (ActionName.substr(0, 3) == "P3_") PlayerIndex = 2;
+				else if (ActionName.substr(0, 3) == "P4_") PlayerIndex = 3;
+
+				// 4. Bind it to the specific profile
+				InputContexts.at(ContextName).BindKey(PhysKey, ActionID, PlayerIndex);
+				std::cout << "Flow [ConfigManager] Mapped Input: [" << ContextName << "] " << ActionName << " -> " << Value << "\n";
+
+				continue; // Skip the rest of the loop for this key
+
+				// ---------------------------------------------------------------
+			}
+
+
 			// Check if we build lambda for this key
 			auto Iterator = PropertyRegistry.find(Key);
 
@@ -815,11 +967,75 @@ namespace Flow
 			}
 		}
 			
+
 	}
+
 }
 
 
 
+
+///////////////////////////////////////////////////////////////////////////
+// FILE: ./Flow/src/Utils/DebugOverlay.h
+///////////////////////////////////////////////////////////////////////////
+
+/*
+#pragma once
+#ifndef NDEBUG
+#include "imgui.h"
+#include <entt/entt.hpp>
+
+namespace FlowEngine {
+    class DebugOverlay {
+    public:
+        // Your Input Manager will flip this boolean when '~' is pressed
+        static inline bool bIsVisible = false;
+
+        // Pass in the registry and a specific hardcoded Entity ID you want to track
+        static void Draw(float currentFPS, entt::registry& registry, entt::entity trackedEntityID) {
+            if (!bIsVisible) return;
+
+            ImGuiIO& io = ImGui::GetIO();
+
+            // Strip away all window features (No background dragging, no title bar, no resizing)
+            ImGuiWindowFlags window_flags =
+                ImGuiWindowFlags_NoDecoration |
+                ImGuiWindowFlags_AlwaysAutoResize |
+                ImGuiWindowFlags_NoSavedSettings |
+                ImGuiWindowFlags_NoFocusOnAppearing |
+                ImGuiWindowFlags_NoNav |
+                ImGuiWindowFlags_NoMove;
+
+            // Math to lock it to the BOTTOM-LEFT corner of the screen
+            ImVec2 window_pos = ImVec2(10.0f, io.DisplaySize.y - 10.0f);
+            ImVec2 window_pos_pivot = ImVec2(0.0f, 1.0f); // Pivot at the bottom-left of the ImGui window
+            ImGui::SetNextWindowPos(window_pos, ImGuiCond_Always, window_pos_pivot);
+            ImGui::SetNextWindowBgAlpha(0.35f); // Transparent dark background
+
+            if (ImGui::Begin("BottomOverlay", &bIsVisible, window_flags)) {
+
+                ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.0f, 1.0f), "FLOW ENGINE DEBUG (~) ");
+                ImGui::Separator();
+                ImGui::Text("FPS: %.1f", currentFPS);
+                ImGui::Separator();
+
+                // BRUTE FORCE TRACKING: Just check if the hardcoded ID exists
+                if (registry.valid(trackedEntityID)) {
+                    // Try to get its transform (Assuming you have a Transform component)
+                    if (auto* transform = registry.try_get<Transform>(trackedEntityID)) {
+                        ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "Tracking Entity: %d", (uint32_t)trackedEntityID);
+                        ImGui::Text("PosX: %.2f | PosY: %.2f", transform->x, transform->y);
+                    }
+                }
+                else {
+                    ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "Tracked Entity %d is DEAD or INVALID", (uint32_t)trackedEntityID);
+                }
+            }
+            ImGui::End();
+        }
+    };
+}
+#endif
 
 ///////////////////////////////////////////////////////////////////////////
 // FILE: ./Flow/src/Utils/IniParser.cpp
@@ -897,34 +1113,45 @@ namespace Flow
 
 #pragma once
 #include <iostream>
+#include <cstring>
 
 namespace Flow
 {
-    // ANSI Color coded to make the terminal visually readable
+    // ANSI Colors
     constexpr const char* COLOR_RESET = "\033[0m";
     constexpr const char* COLOR_GREEN = "\033[32m";
     constexpr const char* COLOR_YELLOW = "\033[33m";
     constexpr const char* COLOR_RED = "\033[31m";
+
+    // Helper to extract just the filename from the full path
+    inline const char* GetShortFilename(const char* fullPath) {
+        const char* slash = strrchr(fullPath, '\\');
+        if (!slash) slash = strrchr(fullPath, '/');
+        return slash ? slash + 1 : fullPath;
+    }
 }
 
 // ========================================================================
-// CORE LOGGING MACROS
+// UPDATED CORE LOGGING MACROS
 // ========================================================================
-// The #ifndef NDEBUG means "If Not Debug". 
-// This automatically disables logs when you build the final game.
 
 #ifndef NDEBUG
-    // Uses standard output. Automatically appends colors and newlines.
-#define FLOW_LOG_INFO(Message)  std::cout << Flow::COLOR_GREEN  << "Flow [INFO]  " << Message << Flow::COLOR_RESET << "\n"
-#define FLOW_LOG_WARN(Message)  std::cout << Flow::COLOR_YELLOW << "Flow [WARN]  " << Message << Flow::COLOR_RESET << "\n"
+    // We use ##__VA_ARGS__ to allow the optional variables to be passed in
+#define FLOW_LOG_INFO(Message, ...) \
+        std::cout << Flow::COLOR_GREEN << "Flow [INFO]  [" << Flow::GetShortFilename(__FILE__) << ":" << __LINE__ << "] " \
+        << Message << Flow::COLOR_RESET << "\n", ##__VA_ARGS__
 
-// Uses standard error output (cerr) which skips buffers for immediate crash reporting
-#define FLOW_LOG_ERROR(Message) std::cerr << Flow::COLOR_RED    << "Flow [ERROR] " << Message << Flow::COLOR_RESET << "\n"
+#define FLOW_LOG_WARN(Message, ...) \
+        std::cout << Flow::COLOR_YELLOW << "Flow [WARN]  [" << Flow::GetShortFilename(__FILE__) << ":" << __LINE__ << "] " \
+        << Message << Flow::COLOR_RESET << "\n", ##__VA_ARGS__
+
+#define FLOW_LOG_ERROR(Message, ...) \
+        std::cerr << Flow::COLOR_RED << "Flow [ERROR] [" << Flow::GetShortFilename(__FILE__) << ":" << __LINE__ << "] " \
+        << Message << Flow::COLOR_RESET << "\n", ##__VA_ARGS__
 #else
-    // In Release mode, these macros turn into literal empty space. Zero performance cost.
-#define FLOW_LOG_INFO(Message)
-#define FLOW_LOG_WARN(Message)
-#define FLOW_LOG_ERROR(Message)
+#define FLOW_LOG_INFO(Message, ...)
+#define FLOW_LOG_WARN(Message, ...)
+#define FLOW_LOG_ERROR(Message, ...)
 #endif
 
 ///////////////////////////////////////////////////////////////////////////
@@ -1011,12 +1238,16 @@ PRUNED PROJECT HIERARCHY (ENGINE CORE ONLY)
 ├── Flow
 │   ├── src
 │   │   ├── Input
+│   │   │   ├── InputContext.h
 │   │   │   ├── InputManager.cpp
 │   │   │   ├── InputManager.h
 │   │   │   ├── InputTypes.h
+│   │   │   ├── KeyMapper.cpp
+│   │   │   ├── KeyMapper.h
 │   │   │   └── StringHash.h
 │   │   ├── Utils
 │   │   │   ├── ConfigManager.cpp
+│   │   │   ├── DebugOverlay.h
 │   │   │   ├── IniParser.cpp
 │   │   │   ├── IniParser.h
 │   │   │   └── Log.h

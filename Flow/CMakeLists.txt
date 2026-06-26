@@ -10,7 +10,7 @@ set(FLOW_SOURCES
 )
 
 # 2. Build the Flow Engine as a STATIC LIBRARY (.lib), not an executable
-add_library(Flow STATIC ${FLOW_SOURCES} "src/ConfigManager.h" "src/Utils/ConfigManager.cpp" "src/Utils/Log.h" "src/Input/StringHash.h" "src/Input/InputTypes.h" "src/Input/InputManager.h" "src/Input/InputManager.cpp" "src/Input/KeyMapper.h" "src/Input/KeyMapper.cpp" "src/Input/InputContext.h")
+add_library(Flow STATIC ${FLOW_SOURCES} "src/ConfigManager.h" "src/Utils/ConfigManager.cpp" "src/Utils/Log.h" "src/Input/StringHash.h" "src/Input/InputTypes.h" "src/Input/InputManager.h" "src/Input/InputManager.cpp" "src/Input/KeyMapper.h" "src/Input/KeyMapper.cpp" "src/Input/InputContext.h" "src/Utils/DebugOverlay.h")
 
 # 3. Expose the Flow/src folder so the Sandbox can see our header files
 target_include_directories(Flow PUBLIC src)
@@ -22,4 +22,5 @@ target_link_libraries(Flow PUBLIC
     SFML::Window 
     SFML::System 
     ImGui-SFML::ImGui-SFML
+    EnTT::EnTT
 )

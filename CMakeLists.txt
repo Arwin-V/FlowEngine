@@ -47,8 +47,18 @@ FetchContent_Declare(ImGui-SFML
 )
 FetchContent_MakeAvailable(ImGui-SFML)
 
-# 4. Tell CMake to process our two sub-folders
+# ---------------------------------------------------------
+# 4. Download EnTT (Entity Component System)
+# ---------------------------------------------------------
+message(STATUS "Fetching EnTT 3.13.0...")
+FetchContent_Declare(entt
+    GIT_REPOSITORY https://github.com/skypjack/entt.git
+    GIT_TAG v3.13.0
+)
+FetchContent_MakeAvailable(entt)
+# ---------------------------------------------------------
+
+# 5. Tell CMake to process our two sub-folders
 add_subdirectory(Flow)
 add_subdirectory(Sandbox)
-
 
