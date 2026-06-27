@@ -17,4 +17,20 @@ namespace Flow
         float vy = 0.0f;
     };
 
+    struct BoxCollider
+    {
+        float width = 0.0f;
+        float height = 0.0f;
+        // Offset allows the designer to shift the hitbox away from the sprite's origin
+        float offsetX = 0.0f;
+        float offsetY = 0.0f;
+    };
+
+    struct CircleCollider 
+    {
+        float radius = 0.0f;
+        float offsetX = 0.0f;
+        float offsetY = 0.0f;
+    };
+
 }
