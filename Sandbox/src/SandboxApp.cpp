@@ -7,64 +7,54 @@
 #include "ECS/Systems/PhysicsSystem.h" 
 #include "ECS/Systems/RenderSystem.h"
 #include "ECS/Systems/CollisionSystem.h"
+#include "ECS/Systems/PlatformerMovementSystem.h"
+#include "ECS/Systems/PlatformCollisionSystem.h"
 
 class Sandbox : public Flow::Application 
 
 {
 public:
-    virtual void OnStart() override 
-    
+    virtual void OnStart() override
     {
         // ---------------------------------------------------------
-        // 1. THE FLOOR (Static Geometry)
+        // 1. THE FLOOR (Static World Bounds)
         // ---------------------------------------------------------
         auto floor = GetRegistry().create();
-        GetRegistry().emplace<Flow::Transform>(floor, 0.0f, 600.0f); // Placed near the bottom of the screen
-        auto& floorBox = GetRegistry().emplace<Flow::BoxCollider>(floor, 1280.0f, 50.0f); // Massive width
-        // Notice: We don't add a RigidBody or Velocity. The engine treats it as a Static immovable object.
+        GetRegistry().emplace<Flow::Transform>(floor, 0.0f, 650.0f);
+        auto& floorBox = GetRegistry().emplace<Flow::BoxCollider>(floor, 1280.0f, 50.0f);
+        floorBox.objectType = Flow::CollisionChannel::WorldStatic;
 
         // ---------------------------------------------------------
-        // 2. THE PLAYER (Dynamic - Standard Gravity)
+        // 2. JUMPING PLATFORMS (Static)
+        // ---------------------------------------------------------
+        auto plat1 = GetRegistry().create();
+        GetRegistry().emplace<Flow::Transform>(plat1, 300.0f, 500.0f);
+        GetRegistry().emplace<Flow::BoxCollider>(plat1, 200.0f, 20.0f);
+
+        auto plat2 = GetRegistry().create();
+        GetRegistry().emplace<Flow::Transform>(plat2, 700.0f, 400.0f);
+        GetRegistry().emplace<Flow::BoxCollider>(plat2, 200.0f, 20.0f);
+
+        auto plat3 = GetRegistry().create();
+        GetRegistry().emplace<Flow::Transform>(plat3, 400.0f, 250.0f);
+        GetRegistry().emplace<Flow::BoxCollider>(plat3, 150.0f, 20.0f);
+
+        // ---------------------------------------------------------
+        // 3. THE KINEMATIC PLAYER (Red Square)
         // ---------------------------------------------------------
         auto player = GetRegistry().create();
-        GetRegistry().emplace<Flow::Transform>(player, 100.0f, 100.0f);
+        GetRegistry().emplace<Flow::Transform>(player, 100.0f, 500.0f); // Start on the left, above floor
         GetRegistry().emplace<Flow::Velocity>(player, 0.0f, 0.0f);
-        GetRegistry().emplace<Flow::PlayerController>(player);
+
+        // Use the NEW PlatformerController instead of RigidBody!
+        auto& pCtrl = GetRegistry().emplace<Flow::PlatformerController>(player);
+        pCtrl.moveSpeed = 400.0f;
+        pCtrl.jumpForce = 700.0f; // Tweak this for Mario feel
+
         auto& pBox = GetRegistry().emplace<Flow::BoxCollider>(player, 40.0f, 40.0f);
         pBox.objectType = Flow::CollisionChannel::Player;
 
-        auto& pRigid = GetRegistry().emplace<Flow::RigidBody>(player);
-        pRigid.mass = 1.0f;
-        pRigid.gravityScale = 1.0f;
-        pRigid.linearDrag = 15.0f; // VERY high drag for snappy stopping
-
-        // ---------------------------------------------------------
-        // 3. THE HEAVY CRATE (Dynamic - Falls from the sky)
-        // ---------------------------------------------------------
-        auto crate = GetRegistry().create();
-        GetRegistry().emplace<Flow::Transform>(crate, 400.0f, -100.0f); // Starts way up high
-        GetRegistry().emplace<Flow::Velocity>(crate, 0.0f, 0.0f);
-        GetRegistry().emplace<Flow::BoxCollider>(crate, 80.0f, 80.0f); // Big box
-
-        auto& cRigid = GetRegistry().emplace<Flow::RigidBody>(crate);
-        cRigid.type = Flow::BodyType::Dynamic;
-        cRigid.mass = 50.0f; // Very heavy
-        cRigid.gravityScale = 1.5f; // Falls 50% faster than the player
-
-        // ---------------------------------------------------------
-        // 4. THE MAGIC ORB (Dynamic - Anti-Gravity)
-        // ---------------------------------------------------------
-        auto orb = GetRegistry().create();
-        GetRegistry().emplace<Flow::Transform>(orb, 600.0f, 500.0f); // Starts near the floor
-        GetRegistry().emplace<Flow::Velocity>(orb, 0.0f, 0.0f);
-        GetRegistry().emplace<Flow::BoxCollider>(orb, 30.0f, 30.0f);
-
-        auto& oRigid = GetRegistry().emplace<Flow::RigidBody>(orb);
-        oRigid.type = Flow::BodyType::Dynamic;
-        oRigid.mass = 0.5f; // Light weight
-        oRigid.gravityScale = -0.2f; // Negative gravity! It will slowly float upwards off the screen.
-
-        FLOW_LOG_INFO("Sandbox: Physics Testbed Initialized!");
+        FLOW_LOG_INFO("Sandbox: Platformer Testbed Initialized!");
     }
 
     virtual void OnUpdate(float deltaTime) override // Runs in fixed time loop
@@ -72,11 +62,18 @@ public:
         // Orchestrate the Physics System
         auto& actions = GetInputManager().GetFrameActions();
        
+        // 1. Calculate input and intended velocity
+        Flow::PlatformMovementSystem::Update(GetRegistry(), actions, deltaTime);
+
+        // 2. Move player, check bounds, push out, and determine bIsGrounded
+        Flow::PlatformCollisionSystem::Update(GetRegistry(), deltaTime);
+        
+        // Old COllision setup..........
         // 1. Move Player (Player might step inside a wall here)
-        Flow::PhysicsSystem::Update(GetRegistry(), actions, deltaTime);
+       // Flow::PhysicsSystem::Update(GetRegistry(), actions, deltaTime);
 
         // 2. Collision (If inside a wall, push them immediately back out before Render)
-        Flow::CollisionSystem::Update(GetRegistry());
+       // Flow::CollisionSystem::Update(GetRegistry());
     }
 
    virtual void Draw() override 

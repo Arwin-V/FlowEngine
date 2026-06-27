@@ -96,14 +96,7 @@ namespace Flow {
                     velocity.vy += PLATFORM_GRAVITY * deltaTime;
                 }
 
-                // ==========================================
-                // PRE-COLLISION INTEGRATION
-                // ==========================================
-                // We apply the velocity to the transform here. 
-                // CRITICAL NEXT STEP: The CollisionSystem must immediately follow this 
-                // in the Game Loop to push the player out of walls/floors and set bIsGrounded.
-                transform.x += velocity.vx * deltaTime;
-                transform.y += velocity.vy * deltaTime;
+      
             }
         }
 

@@ -8,16 +8,25 @@ namespace Flow {
     class RenderSystem {
     public:
         static void Draw(entt::registry& registry, sf::RenderWindow& window) {
-            auto view = registry.view<Transform>();
+            // View entities that have BOTH Transform and BoxCollider
+            auto view = registry.view<Transform, BoxCollider>();
 
             for (auto entity : view) {
                 auto& transform = view.get<Transform>(entity);
+                auto& box = view.get<BoxCollider>(entity);
 
-                sf::CircleShape circle(20.0f);
-                circle.setFillColor(sf::Color::Green);
-                circle.setPosition({ transform.x, transform.y });
+                sf::RectangleShape rect({ box.width, box.height });
+                rect.setPosition({ transform.x + box.offsetX, transform.y + box.offsetY });
 
-                window.draw(circle);
+                // If it's the player, make it RED. Otherwise, GREEN platforms.
+                if (registry.any_of<PlatformerController>(entity)) {
+                    rect.setFillColor(sf::Color::Red);
+                }
+                else {
+                    rect.setFillColor(sf::Color::Green);
+                }
+
+                window.draw(rect);
             }
         }
     };

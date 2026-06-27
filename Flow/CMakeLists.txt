@@ -28,7 +28,7 @@ add_library(Flow STATIC ${FLOW_SOURCES}
     "src/Physics/CollisionMath.h" 
     "src/Physics/CollisionTypes.h"
     "src/ECS/Systems/CollisionSystem.h" 
-      "src/ECS/Systems/PlatformerMovementSystem.h")
+      "src/ECS/Systems/PlatformerMovementSystem.h" "src/ECS/Systems/PlatformCollisionSystem.h")
 
 # 3. Expose the Flow/src folder so the Sandbox can see our header files
 target_include_directories(Flow PUBLIC src)
