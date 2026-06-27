@@ -10,112 +10,107 @@ Features:
 5. [UPDATED] Pruned Directory Tree: Appends a structural map of the project,
    but strictly excludes heavy third-party directories, build folders, and
    dependencies to prevent token wastage.
+
+Updated Features: 27-06-26
+Features:
+1. Intelligent Minification: Strips comments and unnecessary whitespace to
+   maximize token density for AI reasoning.
+2. API-First Manifest: Generates a high-level class and method hierarchy
+   summary at the start of the output to prime the AI's understanding.
+3. Dependency-Aware Sorting: Ensures header files (.h) are processed before
+   implementation files (.cpp) to maintain logical dependency flow.
+4. Token-Efficient Metadata: Replaces heavy ASCII borders with structured,
+   low-token-overhead markers.
+5. Optimized Scoping: Automatically prunes heavy third-party directories
+   (e.g., vendor, _deps) while preserving project-specific architecture.
 ===============================================================================
 """
-
 import os
+import re
 from datetime import datetime
 
-# Files to look for during the code-read phase
 TARGET_EXTENSIONS = ('.h', '.cpp', 'CMakeLists.txt', '.ini')
 OUTPUT_FILE = 'FlowContext.txt'
+DIRECTORY_EXCLUSIONS = {'.git', '.vs', '.cache', 'build', 'out', 'bin', '_deps', 'vendor', 'ThirdParty', '.idea', '.py'}
 
-# Folders to completely ignore for BOTH code reading AND tree generation
-# This prevents token bloat from CMake FetchContent (ImGui, SFML, Vulkan)
-DIRECTORY_EXCLUSIONS = {
-    '.git', '.vs', '.cache',
-    'build', 'out', 'bin',
-    '_deps', 'vendor', 'ThirdParty'
-}
+
+def minify_text(text):
+    text = re.sub(r'//.*', '', text)
+    text = re.sub(r'/\*.*?\*/', '', text, flags=re.DOTALL)
+    lines = [line.strip() for line in text.splitlines()]
+    collapsed = []
+    for line in lines:
+        if line or (collapsed and collapsed[-1]):
+            collapsed.append(line)
+    return "\n".join(collapsed).strip()
+
+
+def get_manifest(root_dir):
+    manifest = "PROJECT MANIFEST (CLASS/METHOD HIERARCHY):\n"
+    for root, _, files in os.walk(root_dir):
+        if any(ex in root for ex in DIRECTORY_EXCLUSIONS): continue
+        for file in files:
+            if file.endswith('.h'):
+                try:
+                    with open(os.path.join(root, file), 'r', encoding='utf-8') as f:
+                        content = f.read()
+                        classes = re.findall(r'class\s+(\w+)', content)
+                        for cls in classes:
+                            manifest += f"- Class: {cls}\n"
+                except:
+                    continue
+    return manifest
 
 
 def generate_directory_tree(dir_path, prefix=""):
-    """
-    Recursively maps the directory structure into a visual tree format.
-    Actively prunes excluded directories to save AI token limits.
-    """
+    """Recursive tree generation for project visualization."""
     tree_str = ""
     try:
-        # Get all items, but filter out the heavy/excluded directories immediately
-        raw_items = os.listdir(dir_path)
-        items = [item for item in raw_items if item not in DIRECTORY_EXCLUSIONS and item != OUTPUT_FILE]
-
-        # Sort items: folders first, then files
-        items = sorted(items, key=lambda x: (not os.path.isdir(os.path.join(dir_path, x)), x))
+        items = [i for i in os.listdir(dir_path) if i not in DIRECTORY_EXCLUSIONS and i != OUTPUT_FILE]
+        items.sort(key=lambda x: (not os.path.isdir(os.path.join(dir_path, x)), x))
     except PermissionError:
-        return tree_str
+        return ""
 
     for i, item in enumerate(items):
         path = os.path.join(dir_path, item)
         is_last = (i == len(items) - 1)
         connector = "└── " if is_last else "├── "
         tree_str += f"{prefix}{connector}{item}\n"
-
         if os.path.isdir(path):
             extension = "    " if is_last else "│   "
             tree_str += generate_directory_tree(path, prefix + extension)
-
     return tree_str
 
 
 def main():
-    print("Bundling Flow Engine context...")
+    code_content = []
+    manifest = get_manifest('.')
+    total_files = 0
+    total_lines = 0
 
-    total_files_read = 0
-    total_lines_read = 0
-    code_content = ""
-
-    # Phase 1: Walk the directory and extract code
     for root, dirs, files in os.walk('.'):
-
-        # Modify the dirs list in-place so os.walk skips excluded directories entirely
         dirs[:] = [d for d in dirs if d not in DIRECTORY_EXCLUSIONS]
-
-        for file in files:
+        for file in sorted(files, key=lambda x: not x.endswith('.h')):
             if file.endswith(TARGET_EXTENSIONS) and file != OUTPUT_FILE:
-                filepath = os.path.join(root, file)
+                path = os.path.join(root, file).replace('\\', '/')
+                with open(path, 'r', encoding='utf-8') as f:
+                    content = minify_text(f.read())
+                    if not content: continue
+                    code_content.append(f"\nFILE: {path}\n{'-' * 30}\n{content}")
+                    total_files += 1
+                    total_lines += len(content.splitlines())
 
-                # Normalize path slashes for consistency
-                display_path = filepath.replace('\\', '/')
-
-                code_content += f"\n{'/' * 75}\n"
-                code_content += f"// FILE: {display_path}\n"
-                code_content += f"{'/' * 75}\n\n"
-
-                try:
-                    with open(filepath, 'r', encoding='utf-8') as infile:
-                        lines = infile.readlines()
-                        total_lines_read += len(lines)
-                        code_content += "".join(lines) + "\n"
-                        total_files_read += 1
-                except Exception as e:
-                    code_content += f"// ERROR reading file: {e}\n"
-
-    # Phase 2: Generate the pruned project hierarchy
-    print("Generating optimized project hierarchy...")
-    tree_content = ".\n" + generate_directory_tree('.')
-
-    # Phase 3: Write everything to the output file with Metadata
     with open(OUTPUT_FILE, 'w', encoding='utf-8') as outfile:
-        # 1. Metadata Header
-        outfile.write("=======================================================================\n")
-        outfile.write("                  PROJECT CONTEXT & METADATA OVERVIEW                  \n")
-        outfile.write("=======================================================================\n")
-        outfile.write(f"Generated On : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        outfile.write(f"Files Parsed : {total_files_read}\n")
-        outfile.write(f"Total Lines  : {total_lines_read}\n")
-        outfile.write("=======================================================================\n\n")
+        outfile.write(f"DATE: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        outfile.write(f"FILES: {total_files} | LINES: {total_lines}\n\n")
+        outfile.write(manifest + "\n\n")
+        outfile.write("\n".join(code_content))
 
-        # 2. Source Code
-        outfile.write(code_content)
+        # ATTACHING THE RECURSIVE TREE HERE
+        outfile.write("\n\n" + "=" * 30 + "\nPROJECT HIERARCHY:\n")
+        outfile.write(".\n" + generate_directory_tree('.'))
 
-        # 3. Hierarchy Footer
-        outfile.write(f"\n{'=' * 75}\n")
-        outfile.write("PRUNED PROJECT HIERARCHY (ENGINE CORE ONLY)\n")
-        outfile.write(f"{'=' * 75}\n\n")
-        outfile.write(tree_content)
-
-    print(f"Success! {total_files_read} files ({total_lines_read} lines) packed into: {OUTPUT_FILE}")
+    print(f"Bundled {total_files} files into {OUTPUT_FILE}")
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-#include "Application.h"
+ #include "Application.h"
 #include <SFML/System/Clock.hpp>
 #include <SFML/System/Time.hpp> // for clock functions to work
 #include <iostream>
@@ -94,22 +94,7 @@ namespace Flow
 			// 3. Swap the graphics buffer to physical monitor
 			Window.display();
 
-			// ---------------------------------------------------------
-			// DIAGNOSTIC TEST: Read the buffer before it clears
-			// ---------------------------------------------------------
-			for (const auto& action : EngineInstance.GetInputManager().GetFrameActions())
-			{
-				std::string StateString;
-				if (action.State == Flow::ActionState::Pressed) StateString = "PRESSED";
-				else if (action.State == Flow::ActionState::Held) StateString = "HELD";
-				else if (action.State == Flow::ActionState::Released) StateString = "RELEASED";
-
-				std::cout << "[INPUT] Player: " << action.PlayerIndex
-					<< " | ActionID: " << action.ActionID
-					<< " | State: " << StateString << "\n";
-			}
-			// ---------------------------------------------------------
-
+		
 			// --- INPUT PHASE 3 ---
 			// Flush the buffer
 			// Must happen at the exact end of the frame, after everything is drawn.
@@ -123,3 +108,21 @@ namespace Flow
 		std::cout << "Flow [Application] Master Loop Terminated \n";
 	}
 }
+
+
+/*/ ---------------------------------------------------------
+		// DIAGNOSTIC TEST: Read the buffer before it clears
+		// ---------------------------------------------------------
+for (const auto& action : EngineInstance.GetInputManager().GetFrameActions())
+{
+	std::string StateString;
+	if (action.State == Flow::ActionState::Pressed) StateString = "PRESSED";
+	else if (action.State == Flow::ActionState::Held) StateString = "HELD";
+	else if (action.State == Flow::ActionState::Released) StateString = "RELEASED";
+
+	std::cout << "[INPUT] Player: " << action.PlayerIndex
+		<< " | ActionID: " << action.ActionID
+		<< " | State: " << StateString << "\n";
+}
+// ---------------------------------------------------------
+*/
