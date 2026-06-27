@@ -20,7 +20,7 @@ namespace Flow
 		// 2. Call the Sandbox's initialization hook
 		OnStart();
 
-		// Get a murable ref to the actual window
+		// Get a mutable ref to the actual window
 		sf::RenderWindow& Window = EngineInstance.GetWindow();
 
 

@@ -24,6 +24,12 @@ namespace Flow
 		double GetRealElapsedTime() const { return RealElapsedTime; }
 		double GetGameElapsedTime() const { return GameElapsedTime; }
 
+		entt::registry& GetRegistry() { return EngineInstance.GetRegistry(); }
+
+		sf::RenderWindow& GetWindow() { return EngineInstance.GetWindow(); }
+
+		InputManager& GetInputManager() { return EngineInstance.GetInputManager(); }
+
 	private:
 		Engine EngineInstance;
 		bool bIsApplicationRunning = true;

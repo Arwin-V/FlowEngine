@@ -2,6 +2,7 @@
 #include <SFML/Graphics.hpp>
 #include "ConfigManager.h"
 #include "Input/InputManager.h"
+#include <entt/entt.hpp>
 
 
 namespace Flow 
@@ -23,6 +24,8 @@ namespace Flow
 
 		InputManager& GetInputManager() { return InputSys; }
 
+		entt::registry& GetRegistry() { return Registry; }
+
 		bool IsRunning() const { return bIsEngineRunning; }
 		void Stop() { bIsEngineRunning = false; }
 
@@ -30,6 +33,8 @@ namespace Flow
 
 		// 3. Engine permanently owns input Manager in RAM
 		InputManager InputSys;
+
+		entt::registry Registry;
 
 		// Engine Status
 		bool bIsEngineRunning = false;
