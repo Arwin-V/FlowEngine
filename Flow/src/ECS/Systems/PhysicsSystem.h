@@ -11,7 +11,7 @@ namespace Flow {
     public:
 
         // A global gravity constant for the whole world (e.g., pulling down at 980 pixels/sec^2)
-        static constexpr float WORLD_GRAVITY = 5000.0f;
+        static constexpr float WORLD_GRAVITY = 3000.0f;
 
         // A static function means we don't need to create a "PhysicsSystem" object.
         // We just run the math directly.

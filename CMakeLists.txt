@@ -58,6 +58,16 @@ FetchContent_Declare(entt
 FetchContent_MakeAvailable(entt)
 # ---------------------------------------------------------
 
+# ---------------------------------------------------------
+# 5. Download nlohmann/json (Standard C++ JSON library)
+# ---------------------------------------------------------
+message(STATUS "Fetching nlohmann_json...")
+FetchContent_Declare(json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG v3.11.3
+)
+FetchContent_MakeAvailable(json)
+
 # 5. Tell CMake to process our two sub-folders
 add_subdirectory(Flow)
 add_subdirectory(Sandbox)

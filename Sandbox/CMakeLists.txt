@@ -17,4 +17,11 @@ add_custom_command(TARGET Sandbox POST_BUILD
     ${CMAKE_SOURCE_DIR}/Configs
     $<TARGET_FILE_DIR:Sandbox>/Configs
     COMMENT "Copying Configs folder to the exact binary directory..."
+
+add_custom_command(TARGET Sandbox POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory 
+            ${CMAKE_SOURCE_DIR}/Assets 
+            $<TARGET_FILE_DIR:Sandbox>/Assets
+    COMMENT "Syncing entire Assets tree to binary directory..."
+)
 )

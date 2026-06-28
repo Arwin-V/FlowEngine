@@ -120,4 +120,27 @@ namespace Flow
         bool bIsGrounded = false;
         bool bIsJumping = false;
     };
+
+    struct SpriteComponent 
+    {
+        std::shared_ptr<sf::Texture> Texture;
+        sf::Sprite Sprite;
+    };
+
+    // Stores the sequence of image crops for a specific action
+    struct Animation 
+    {
+        std::shared_ptr<sf::Texture> texture;
+        std::vector<sf::IntRect> frames;
+        float frameTime = 0.1f;
+    };
+
+    struct AnimatorComponent 
+    {
+        std::unordered_map<std::string, Animation> animations;
+        std::string currentState = "Idle";
+        int currentFrame = 0;
+        float timer = 0.0f;
+        bool bFlipX = false;
+    };
 }

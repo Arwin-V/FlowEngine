@@ -13,7 +13,7 @@ namespace Flow {
     class PlatformMovementSystem {
     public:
         // Core Gravity Constant for the Platformer World
-        static constexpr float PLATFORM_GRAVITY = 2000.0f;
+        static constexpr float PLATFORM_GRAVITY = 500;
 
         static void Update(entt::registry& registry, const std::vector<GameAction>& actions, float deltaTime)
         {
@@ -35,7 +35,8 @@ namespace Flow {
                 }
                 else if (action.ActionID == Flow::HashString("P1_JUMP"))
                 {
-                    if (action.State == ActionState::Pressed) bJumpPressed = true;
+                    // Accept Held so the input survives the render frame wipe
+                    if (action.State == ActionState::Pressed || action.State == ActionState::Held) bJumpPressed = true;
                     if (action.State == ActionState::Pressed || action.State == ActionState::Held) bJumpHeld = true;
                 }
             }

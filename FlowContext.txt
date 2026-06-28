@@ -1,13 +1,16 @@
-DATE: 2026-06-27 18:10:40
-FILES: 29 | LINES: 1395
+DATE: 2026-06-28 12:29:17
+FILES: 33 | LINES: 1817
 
 PROJECT MANIFEST (CLASS/METHOD HIERARCHY):
 - Class: Application
 - Class: ConfigManager
 - Class: Engine
 - Class: BodyType
+- Class: AnimationSystem
 - Class: CollisionSystem
 - Class: PhysicsSystem
+- Class: PlatformCollisionSystem
+- Class: PlatformMovementSystem
 - Class: RenderSystem
 - Class: InputContext
 - Class: InputManager
@@ -16,6 +19,7 @@ PROJECT MANIFEST (CLASS/METHOD HIERARCHY):
 - Class: CollisionMath
 - Class: CollisionChannel
 - Class: CollisionResponse
+- Class: AssetManager
 - Class: DebugOverlay
 - Class: IniParser
 
@@ -83,6 +87,16 @@ GIT_TAG v3.13.0
 FetchContent_MakeAvailable(entt)
 # ---------------------------------------------------------
 
+# ---------------------------------------------------------
+# 5. Download nlohmann/json (Standard C++ JSON library)
+# ---------------------------------------------------------
+message(STATUS "Fetching nlohmann_json...")
+FetchContent_Declare(json
+GIT_REPOSITORY https:
+GIT_TAG v3.11.3
+)
+FetchContent_MakeAvailable(json)
+
 # 5. Tell CMake to process our two sub-folders
 add_subdirectory(Flow)
 add_subdirectory(Sandbox)
@@ -102,11 +116,10 @@ MaxPlayers=4
 [Input]
 ; Format -> ContextName.ActionName=HardwareKey
 
-; --- Gameplay Context (Spaceship Controls) ---
-Gameplay.P1_THRUST=W
-Gameplay.P1_SHOOT=Space
-Gameplay.P2_THRUST=Up
-Gameplay.P2_SHOOT=Enter
+; --- Gameplay Context (Platformer Controls) ---
+Gameplay.P1_LEFT=A
+Gameplay.P1_RIGHT=D
+Gameplay.P1_JUMP=Space
 
 ; --- UI Menu Context (For pausing the game) ---
 Menu.UI_UP=W
@@ -146,7 +159,7 @@ add_library(Flow STATIC ${FLOW_SOURCES}
 "src/Physics/CollisionMath.h"
 "src/Physics/CollisionTypes.h"
 "src/ECS/Systems/CollisionSystem.h"
-)
+"src/ECS/Systems/PlatformerMovementSystem.h" "src/ECS/Systems/PlatformCollisionSystem.h" "src/Utils/AssetManager.h" "src/ECS/Systems/AnimationSystem.h")
 
 # 3. Expose the Flow/src folder so the Sandbox can see our header files
 target_include_directories(Flow PUBLIC src)
@@ -159,6 +172,7 @@ SFML::Window
 SFML::System
 ImGui-SFML::ImGui-SFML
 EnTT::EnTT
+nlohmann_json::nlohmann_json
 )
 
 FILE: ./Flow/src/Application.h
@@ -605,6 +619,67 @@ float velocityY = 0.0f;
 bool bIsGrounded = false;
 bool bIsJumping = false;
 };
+
+struct SpriteComponent
+{
+std::shared_ptr<sf::Texture> Texture;
+sf::Sprite Sprite;
+};
+
+struct Animation
+{
+std::shared_ptr<sf::Texture> texture;
+std::vector<sf::IntRect> frames;
+float frameTime = 0.1f;
+};
+
+struct AnimatorComponent
+{
+std::unordered_map<std::string, Animation> animations;
+std::string currentState = "Idle";
+int currentFrame = 0;
+float timer = 0.0f;
+bool bFlipX = false;
+};
+}
+
+FILE: ./Flow/src/ECS/Systems/AnimationSystem.h
+------------------------------
+#pragma once
+#include <entt/entt.hpp>
+#include <cmath>
+#include "ECS/Components.h"
+
+namespace Flow {
+class AnimationSystem {
+public:
+static void Update(entt::registry& registry, float deltaTime) {
+auto view = registry.view<AnimatorComponent, Velocity>();
+
+for (auto entity : view) {
+auto& anim = view.get<AnimatorComponent>(entity);
+auto& vel = view.get<Velocity>(entity);
+
+std::string nextState = (std::abs(vel.vx) > 10.0f) ? "Run" : "Idle";
+
+if (anim.currentState != nextState) {
+anim.currentState = nextState;
+anim.currentFrame = 0;
+anim.timer = 0.0f;
+}
+
+if (vel.vx < -1.0f) anim.bFlipX = true;
+else if (vel.vx > 1.0f) anim.bFlipX = false;
+
+auto& currentAnim = anim.animations[anim.currentState];
+anim.timer += deltaTime;
+if (anim.timer >= currentAnim.frameTime) {
+anim.timer -= currentAnim.frameTime;
+anim.currentFrame = (anim.currentFrame + 1) % currentAnim.frames.size();
+}
+}
+}
+};
 }
 
 FILE: ./Flow/src/ECS/Systems/CollisionSystem.h
@@ -705,7 +780,7 @@ namespace Flow {
 class PhysicsSystem {
 public:
 
-static constexpr float WORLD_GRAVITY = 5000.0f;
+static constexpr float WORLD_GRAVITY = 3000.0f;
 
 static void Update(entt::registry& registry, const std::vector<GameAction>& actions, float deltaTime)
 {
@@ -778,6 +853,198 @@ transform.y += velocity.vy * deltaTime;
 };
 }
 
+FILE: ./Flow/src/ECS/Systems/PlatformCollisionSystem.h
+------------------------------
+#pragma once
+#include <entt/entt.hpp>
+#include "ECS/Components.h"
+#include "Physics/CollisionMath.h"
+
+namespace Flow {
+class PlatformCollisionSystem {
+public:
+static void Update(entt::registry& registry, float deltaTime) {
+
+auto playerView = registry.view<Transform, Velocity, PlatformerController, BoxCollider>();
+
+auto staticView = registry.view<Transform, BoxCollider>();
+
+for (auto playerEntity : playerView) {
+auto& pTransform = playerView.get<Transform>(playerEntity);
+auto& pVel = playerView.get<Velocity>(playerEntity);
+auto& pCtrl = playerView.get<PlatformerController>(playerEntity);
+auto& pBox = playerView.get<BoxCollider>(playerEntity);
+
+pCtrl.bIsGrounded = false;
+
+pTransform.x += pVel.vx * deltaTime;
+
+for (auto staticEntity : staticView) {
+if (playerEntity == staticEntity) continue;
+
+auto* rb = registry.try_get<RigidBody>(staticEntity);
+if (rb && rb->type != BodyType::Static) continue;
+
+auto& sTransform = staticView.get<Transform>(staticEntity);
+auto& sBox = staticView.get<BoxCollider>(staticEntity);
+
+float pX = pTransform.x + pBox.offsetX;
+float pY = pTransform.y + pBox.offsetY;
+float sX = sTransform.x + sBox.offsetX;
+float sY = sTransform.y + sBox.offsetY;
+
+if (CollisionMath::CheckAABB(pX, pY, pBox.width, pBox.height, sX, sY, sBox.width, sBox.height)) {
+
+if (pVel.vx > 0) {
+pTransform.x = sX - (pBox.width + pBox.offsetX);
+}
+else if (pVel.vx < 0) {
+pTransform.x = (sX + sBox.width) - pBox.offsetX;
+}
+pVel.vx = 0.0f;
+}
+}
+
+pTransform.y += pVel.vy * deltaTime;
+
+for (auto staticEntity : staticView) {
+if (playerEntity == staticEntity) continue;
+
+auto* rb = registry.try_get<RigidBody>(staticEntity);
+if (rb && rb->type != BodyType::Static) continue;
+
+auto& sTransform = staticView.get<Transform>(staticEntity);
+auto& sBox = staticView.get<BoxCollider>(staticEntity);
+
+float pX = pTransform.x + pBox.offsetX;
+float pY = pTransform.y + pBox.offsetY;
+float sX = sTransform.x + sBox.offsetX;
+float sY = sTransform.y + sBox.offsetY;
+
+if (CollisionMath::CheckAABB(pX, pY, pBox.width, pBox.height, sX, sY, sBox.width, sBox.height)) {
+
+if (pVel.vy > 0) {
+
+pTransform.y = sY - (pBox.height + pBox.offsetY);
+pCtrl.bIsGrounded = true;
+pCtrl.bIsJumping = false;
+}
+else if (pVel.vy < 0) {
+
+pTransform.y = (sY + sBox.height) - pBox.offsetY;
+}
+pVel.vy = 0.0f;
+}
+}
+}
+}
+};
+}
+
+FILE: ./Flow/src/ECS/Systems/PlatformerMovementSystem.h
+------------------------------
+#pragma once
+#include <entt/entt.hpp>
+#include <vector>
+#include <cmath>
+#include <algorithm>
+#include "ECS/Components.h"
+#include "Input/InputTypes.h"
+#include "Input/StringHash.h"
+
+namespace Flow {
+class PlatformMovementSystem {
+public:
+
+static constexpr float PLATFORM_GRAVITY = 500;
+
+static void Update(entt::registry& registry, const std::vector<GameAction>& actions, float deltaTime)
+{
+
+bool bMoveLeft = false;
+bool bMoveRight = false;
+bool bJumpPressed = false;
+bool bJumpHeld = false;
+
+for (const auto& action : actions)
+{
+if (action.ActionID == Flow::HashString("P1_LEFT"))
+{
+if (action.State == ActionState::Pressed || action.State == ActionState::Held) bMoveLeft = true;
+}
+else if (action.ActionID == Flow::HashString("P1_RIGHT"))
+{
+if (action.State == ActionState::Pressed || action.State == ActionState::Held) bMoveRight = true;
+}
+else if (action.ActionID == Flow::HashString("P1_JUMP"))
+{
+
+if (action.State == ActionState::Pressed || action.State == ActionState::Held) bJumpPressed = true;
+if (action.State == ActionState::Pressed || action.State == ActionState::Held) bJumpHeld = true;
+}
+}
+
+auto view = registry.view<Transform, Velocity, PlatformerController>();
+for (auto entity : view)
+{
+auto& transform = view.get<Transform>(entity);
+auto& velocity = view.get<Velocity>(entity);
+auto& controller = view.get<PlatformerController>(entity);
+
+float targetVelocityX = 0.0f;
+if (bMoveLeft)  targetVelocityX -= controller.moveSpeed;
+if (bMoveRight) targetVelocityX += controller.moveSpeed;
+
+if (targetVelocityX != 0.0f)
+{
+
+velocity.vx = MoveTowards(velocity.vx, targetVelocityX, controller.acceleration * deltaTime);
+}
+else
+{
+
+velocity.vx = MoveTowards(velocity.vx, 0.0f, controller.friction * deltaTime);
+}
+
+if (bJumpPressed && controller.bIsGrounded)
+{
+velocity.vy = -controller.jumpForce;
+controller.bIsJumping = true;
+controller.bIsGrounded = false;
+}
+
+if (velocity.vy > 0)
+{
+
+velocity.vy += PLATFORM_GRAVITY * controller.fallMultiplier * deltaTime;
+}
+else if (velocity.vy < 0 && !bJumpHeld)
+{
+
+velocity.vy += PLATFORM_GRAVITY * controller.lowJumpMultiplier * deltaTime;
+}
+else
+{
+
+velocity.vy += PLATFORM_GRAVITY * deltaTime;
+}
+
+}
+}
+
+private:
+
+static float MoveTowards(float current, float target, float maxDelta)
+{
+if (std::abs(target - current) <= maxDelta)
+{
+return target;
+}
+return current + std::copysign(maxDelta, target - current);
+}
+};
+}
+
 FILE: ./Flow/src/ECS/Systems/RenderSystem.h
 ------------------------------
 #pragma once
@@ -788,18 +1055,75 @@ FILE: ./Flow/src/ECS/Systems/RenderSystem.h
 namespace Flow {
 class RenderSystem {
 public:
-static void Draw(entt::registry& registry, sf::RenderWindow& window) {
-auto view = registry.view<Transform>();
+static inline bool bDrawDebugColliders = false;
 
-for (auto entity : view) {
-auto& transform = view.get<Transform>(entity);
+static void Draw(entt::registry& registry, sf::RenderWindow& window)
+{
 
-sf::CircleShape circle(20.0f);
-circle.setFillColor(sf::Color::Green);
-circle.setPosition({ transform.x, transform.y });
+auto animView = registry.view<Transform, AnimatorComponent>();
+for (auto entity : animView) {
+auto& transform = animView.get<Transform>(entity);
+auto& anim = animView.get<AnimatorComponent>(entity);
 
-window.draw(circle);
+auto it = anim.animations.find(anim.currentState);
+if (it == anim.animations.end() || !it->second.texture) continue;
+
+Animation& currentAnim = it->second;
+sf::Sprite sprite(*currentAnim.texture);
+
+sf::IntRect rect = currentAnim.frames[anim.currentFrame];
+sprite.setTextureRect(rect);
+
+if (anim.bFlipX) {
+sprite.setScale({ -1.0f, 1.0f });
+sprite.setOrigin({ (float)rect.size.x, 0.0f });
 }
+else {
+sprite.setScale({ 1.0f, 1.0f });
+sprite.setOrigin({ 0.0f, 0.0f });
+}
+
+sprite.setPosition({ transform.x, transform.y });
+window.draw(sprite);
+}
+
+auto staticView = registry.view<Transform, BoxCollider>();
+for (auto entity : staticView) {
+if (registry.any_of<AnimatorComponent>(entity)) continue;
+
+auto& transform = staticView.get<Transform>(entity);
+auto& box = staticView.get<BoxCollider>(entity);
+
+sf::RectangleShape rect({ box.width, box.height });
+rect.setFillColor(sf::Color::Green);
+rect.setPosition({ transform.x + box.offsetX, transform.y + box.offsetY });
+
+window.draw(rect);
+}
+
+if (bDrawDebugColliders)
+{
+auto debugView = registry.view<Transform, BoxCollider>();
+for (auto entity : debugView) {
+auto& transform = debugView.get<Transform>(entity);
+auto& box = debugView.get<BoxCollider>(entity);
+
+sf::RectangleShape outline({ box.width, box.height });
+outline.setFillColor(sf::Color::Transparent);
+
+if (registry.any_of<PlayerController>(entity) || registry.any_of<PlatformerController>(entity)) {
+outline.setOutlineColor(sf::Color::Red);
+}
+else {
+outline.setOutlineColor(sf::Color::Yellow);
+}
+outline.setOutlineThickness(1.0f);
+outline.setPosition({ transform.x + box.offsetX, transform.y + box.offsetY });
+
+window.draw(outline);
+}
+}
+
 }
 };
 }
@@ -1158,6 +1482,100 @@ Block
 };
 }
 
+FILE: ./Flow/src/Utils/AssetManager.h
+------------------------------
+#pragma once
+#include <SFML/Graphics.hpp>
+#include <unordered_map>
+#include <string>
+#include <memory>
+#include "Utils/Log.h"
+#include <nlohmann/json.hpp>
+#include <fstream>
+
+namespace Flow {
+class AssetManager {
+public:
+
+bool BuildAnimatorFromJson(const std::string& jsonPath, AnimatorComponent& animComp) {
+std::ifstream file(jsonPath);
+if (!file.is_open()) {
+FLOW_LOG_ERROR("Failed to open JSON manifest: " + jsonPath);
+return false;
+}
+
+nlohmann::json data;
+try {
+file >> data;
+}
+catch (nlohmann::json::parse_error& e) {
+FLOW_LOG_ERROR(std::string("JSON Parse Error: ") + e.what());
+return false;
+}
+
+for (auto& [stateName, stateData] : data["states"].items()) {
+std::string texPath = stateData["texture_path"];
+
+LoadTexture(texPath, texPath);
+
+Animation anim;
+anim.texture = GetTexture(texPath);
+anim.frameTime = stateData["frame_time"];
+
+int w = stateData["frame_width"];
+int h = stateData["frame_height"];
+int count = stateData["frame_count"];
+
+for (int i = 0; i < count; ++i) {
+anim.frames.push_back(sf::IntRect({ i * w, 0 }, { w, h }));
+}
+
+animComp.animations[stateName] = anim;
+}
+
+animComp.currentState = data["states"].begin().key();
+return true;
+}
+
+AssetManager(const AssetManager&) = delete;
+AssetManager& operator=(const AssetManager&) = delete;
+
+static AssetManager& Get() {
+static AssetManager instance;
+return instance;
+}
+
+void LoadTexture(const std::string& name, const std::string& filepath) {
+
+if (Textures.find(name) == Textures.end()) {
+auto texture = std::make_shared<sf::Texture>();
+if (texture->loadFromFile(filepath)) {
+Textures[name] = texture;
+FLOW_LOG_INFO("AssetManager: Loaded texture -> " + name);
+}
+else {
+FLOW_LOG_ERROR("AssetManager: Failed to load texture -> " + filepath);
+}
+}
+}
+
+std::shared_ptr<sf::Texture> GetTexture(const std::string& name) {
+auto it = Textures.find(name);
+if (it != Textures.end()) {
+return it->second;
+}
+FLOW_LOG_WARN("AssetManager: Texture not found -> " + name);
+return nullptr;
+}
+
+private:
+AssetManager() = default;
+~AssetManager() = default;
+
+std::unordered_map<std::string, std::shared_ptr<sf::Texture>> Textures;
+};
+}
+
 FILE: ./Flow/src/Utils/DebugOverlay.h
 ------------------------------
 /*
@@ -1421,6 +1839,13 @@ COMMAND ${CMAKE_COMMAND} -E copy_directory
 ${CMAKE_SOURCE_DIR}/Configs
 $<TARGET_FILE_DIR:Sandbox>/Configs
 COMMENT "Copying Configs folder to the exact binary directory..."
+
+add_custom_command(TARGET Sandbox POST_BUILD
+COMMAND ${CMAKE_COMMAND} -E copy_directory
+${CMAKE_SOURCE_DIR}/Assets
+$<TARGET_FILE_DIR:Sandbox>/Assets
+COMMENT "Syncing entire Assets tree to binary directory..."
+)
 )
 
 FILE: ./Sandbox/src/SandboxApp.cpp
@@ -1433,52 +1858,51 @@ FILE: ./Sandbox/src/SandboxApp.cpp
 #include "ECS/Systems/PhysicsSystem.h"
 #include "ECS/Systems/RenderSystem.h"
 #include "ECS/Systems/CollisionSystem.h"
+#include "ECS/Systems/PlatformerMovementSystem.h"
+#include "ECS/Systems/PlatformCollisionSystem.h"
+#include "Utils/AssetManager.h"
+#include "ECS/Systems/AnimationSystem.h"
 
 class Sandbox : public Flow::Application
 
 {
 public:
 virtual void OnStart() override
-
 {
+std::cout << "Current working directory is: " << std::filesystem::current_path() << std::endl;
 
 auto floor = GetRegistry().create();
-GetRegistry().emplace<Flow::Transform>(floor, 0.0f, 600.0f);
+GetRegistry().emplace<Flow::Transform>(floor, 0.0f, 650.0f);
 auto& floorBox = GetRegistry().emplace<Flow::BoxCollider>(floor, 1280.0f, 50.0f);
+floorBox.objectType = Flow::CollisionChannel::WorldStatic;
+
+auto plat1 = GetRegistry().create();
+GetRegistry().emplace<Flow::Transform>(plat1, 300.0f, 500.0f);
+GetRegistry().emplace<Flow::BoxCollider>(plat1, 200.0f, 20.0f);
+
+auto plat2 = GetRegistry().create();
+GetRegistry().emplace<Flow::Transform>(plat2, 700.0f, 400.0f);
+GetRegistry().emplace<Flow::BoxCollider>(plat2, 200.0f, 20.0f);
+
+auto plat3 = GetRegistry().create();
+GetRegistry().emplace<Flow::Transform>(plat3, 400.0f, 250.0f);
+GetRegistry().emplace<Flow::BoxCollider>(plat3, 150.0f, 20.0f);
 
 auto player = GetRegistry().create();
-GetRegistry().emplace<Flow::Transform>(player, 100.0f, 100.0f);
+GetRegistry().emplace<Flow::Transform>(player, 100.0f, 500.0f);
 GetRegistry().emplace<Flow::Velocity>(player, 0.0f, 0.0f);
-GetRegistry().emplace<Flow::PlayerController>(player);
+
+auto& pCtrl = GetRegistry().emplace<Flow::PlatformerController>(player);
+pCtrl.moveSpeed = 400.0f;
+pCtrl.jumpForce = 700.0f;
+
 auto& pBox = GetRegistry().emplace<Flow::BoxCollider>(player, 40.0f, 40.0f);
 pBox.objectType = Flow::CollisionChannel::Player;
 
-auto& pRigid = GetRegistry().emplace<Flow::RigidBody>(player);
-pRigid.mass = 1.0f;
-pRigid.gravityScale = 1.0f;
-pRigid.linearDrag = 15.0f;
+auto& pAnim = GetRegistry().emplace<Flow::AnimatorComponent>(player);
+Flow::AssetManager::Get().BuildAnimatorFromJson("Assets/Hero/Hero.json", pAnim);
 
-auto crate = GetRegistry().create();
-GetRegistry().emplace<Flow::Transform>(crate, 400.0f, -100.0f);
-GetRegistry().emplace<Flow::Velocity>(crate, 0.0f, 0.0f);
-GetRegistry().emplace<Flow::BoxCollider>(crate, 80.0f, 80.0f);
-
-auto& cRigid = GetRegistry().emplace<Flow::RigidBody>(crate);
-cRigid.type = Flow::BodyType::Dynamic;
-cRigid.mass = 50.0f;
-cRigid.gravityScale = 1.5f;
-
-auto orb = GetRegistry().create();
-GetRegistry().emplace<Flow::Transform>(orb, 600.0f, 500.0f);
-GetRegistry().emplace<Flow::Velocity>(orb, 0.0f, 0.0f);
-GetRegistry().emplace<Flow::BoxCollider>(orb, 30.0f, 30.0f);
-
-auto& oRigid = GetRegistry().emplace<Flow::RigidBody>(orb);
-oRigid.type = Flow::BodyType::Dynamic;
-oRigid.mass = 0.5f;
-oRigid.gravityScale = -0.2f;
-
-FLOW_LOG_INFO("Sandbox: Physics Testbed Initialized!");
+FLOW_LOG_INFO("Sandbox: Platformer Testbed Initialized!");
 }
 
 virtual void OnUpdate(float deltaTime) override
@@ -1486,9 +1910,23 @@ virtual void OnUpdate(float deltaTime) override
 
 auto& actions = GetInputManager().GetFrameActions();
 
-Flow::PhysicsSystem::Update(GetRegistry(), actions, deltaTime);
+Flow::PlatformMovementSystem::Update(GetRegistry(), actions, deltaTime);
 
-Flow::CollisionSystem::Update(GetRegistry());
+Flow::PlatformCollisionSystem::Update(GetRegistry(), deltaTime);
+
+Flow::AnimationSystem::Update(GetRegistry(), deltaTime);
+
+if (sf::Keyboard::isKeyPressed(sf::Keyboard::F3)) {
+static bool f3WasPressed = false;
+if (!f3WasPressed) {
+Flow::RenderSystem::bDrawDebugColliders = !Flow::RenderSystem::bDrawDebugColliders;
+f3WasPressed = true;
+}
+}
+else {
+
+f3WasPressed = false;
+}
 }
 
 virtual void Draw() override
@@ -1506,14 +1944,22 @@ return new Sandbox();
 ==============================
 PROJECT HIERARCHY:
 .
+├── Assets
+│   └── Hero
+│       ├── Hero.JSON
+│       ├── Idle.png
+│       └── Run.png
 ├── Configs
 │   └── Engine.ini
 ├── Flow
 │   ├── src
 │   │   ├── ECS
 │   │   │   ├── Systems
+│   │   │   │   ├── AnimationSystem.h
 │   │   │   │   ├── CollisionSystem.h
 │   │   │   │   ├── PhysicsSystem.h
+│   │   │   │   ├── PlatformCollisionSystem.h
+│   │   │   │   ├── PlatformerMovementSystem.h
 │   │   │   │   └── RenderSystem.h
 │   │   │   └── Components.h
 │   │   ├── Input
@@ -1528,6 +1974,7 @@ PROJECT HIERARCHY:
 │   │   │   ├── CollisionMath.h
 │   │   │   └── CollisionTypes.h
 │   │   ├── Utils
+│   │   │   ├── AssetManager.h
 │   │   │   ├── ConfigManager.cpp
 │   │   │   ├── DebugOverlay.h
 │   │   │   ├── IniParser.cpp
