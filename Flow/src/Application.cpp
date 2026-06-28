@@ -3,6 +3,7 @@
 #include <SFML/System/Time.hpp> // for clock functions to work
 #include <iostream>
 #include <optional>
+#include <imgui-SFML.h>
 
 
 namespace Flow
@@ -35,16 +36,19 @@ namespace Flow
 
 			// SFML 3.0 c++17 Event polling . Keeps the screen active without freezing
 			// pollEvent() returns and optional event, creating it in the loop condition
-			while (const std::optional event = Window.pollEvent())
+			while (const std::optional Event = Window.pollEvent())
 			{
 				// Strict template checking is used (->ist<T>) instead of checking an integer type
-				if (event->is<sf::Event::Closed>())
+				if (Event->is<sf::Event::Closed>())
 				{
 					bIsApplicationRunning = false;
 				}
 
 				// Dereference the optional event (*event) and pass it to the Input Manager
-				EngineInstance.GetInputManager().ProcessEvent(*event);
+				EngineInstance.GetInputManager().ProcessEvent(*Event);
+
+				// PASS SYSTEM INTAKE TELEMETRY INTO IMGUI LOOKUPS
+				ImGui::SFML::ProcessEvent(Window, *Event);
 			}
 
 			// -- Input Phase 2 --
@@ -76,6 +80,9 @@ namespace Flow
 			// Pour the time into the bucket
 			Accumulator += GameDeltaTime;
 
+			// Interface tick calculations must run on true time steps
+			ImGui::SFML::Update(Window, sf::seconds(RealDeltaTime));
+
 			// The Physicist wakes up
 			while (Accumulator >= FixedTimeStep)
 			{
@@ -90,6 +97,9 @@ namespace Flow
 
 			// 2. The sandbox draws whatever state the Universe currently is in
 			Draw();
+
+			// PUSH THE RENDER DATA BUFFER TO SURFACE WINDOWS LAYER
+			ImGui::SFML::Render(Window);
 
 			// 3. Swap the graphics buffer to physical monitor
 			Window.display();

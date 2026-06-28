@@ -1,5 +1,5 @@
-DATE: 2026-06-28 12:29:17
-FILES: 33 | LINES: 1817
+DATE: 2026-06-28 13:43:59
+FILES: 34 | LINES: 1945
 
 PROJECT MANIFEST (CLASS/METHOD HIERARCHY):
 - Class: Application
@@ -22,6 +22,7 @@ PROJECT MANIFEST (CLASS/METHOD HIERARCHY):
 - Class: AssetManager
 - Class: DebugOverlay
 - Class: IniParser
+- Class: LevelManager
 
 
 
@@ -372,6 +373,7 @@ FILE: ./Flow/src/Application.cpp
 #include <SFML/System/Time.hpp>
 #include <iostream>
 #include <optional>
+#include <imgui-SFML.h>
 
 namespace Flow
 {
@@ -394,15 +396,17 @@ Accumulator = 0.0f;
 while (bIsApplicationRunning)
 {
 
-while (const std::optional event = Window.pollEvent())
+while (const std::optional Event = Window.pollEvent())
 {
 
-if (event->is<sf::Event::Closed>())
+if (Event->is<sf::Event::Closed>())
 {
 bIsApplicationRunning = false;
 }
 
-EngineInstance.GetInputManager().ProcessEvent(*event);
+EngineInstance.GetInputManager().ProcessEvent(*Event);
+
+ImGui::SFML::ProcessEvent(Window, *Event);
 }
 
 EngineInstance.GetInputManager().UpdateContinousStates();
@@ -422,6 +426,8 @@ GameElapsedTime += GameDeltaTime;
 
 Accumulator += GameDeltaTime;
 
+ImGui::SFML::Update(Window, sf::seconds(RealDeltaTime));
+
 while (Accumulator >= FixedTimeStep)
 {
 OnUpdate(FixedTimeStep);
@@ -431,6 +437,8 @@ Accumulator -= FixedTimeStep;
 Window.clear(sf::Color::Black);
 
 Draw();
+
+ImGui::SFML::Render(Window);
 
 Window.display();
 
@@ -448,6 +456,7 @@ FILE: ./Flow/src/Engine.cpp
 #include "Engine.h"
 #include <iostream>
 #include <Utils/IniParser.h>
+#include <imgui-SFML.h>
 
 namespace Flow
 {
@@ -461,6 +470,8 @@ std::cout << "Flow [Engine] Core Subsystems Initializing \n";
 
 LoadConfiguration();
 BootWindow();
+
+(void)ImGui::SFML::Init(Window);
 
 auto& LoadedContexts = ConfigSys.GetInputContexts();
 
@@ -506,6 +517,9 @@ void Engine::RunEngine()
 void Engine::ShutdownEngine()
 {
 std::cout << "Flow [Engine] Core Subsystems Shutting Down....\n";
+
+ImGui::SFML::Shutdown();
+
 bIsEngineRunning = false;
 }
 }
@@ -1052,78 +1066,111 @@ FILE: ./Flow/src/ECS/Systems/RenderSystem.h
 #include <SFML/Graphics.hpp>
 #include "ECS/Components.h"
 
-namespace Flow {
-class RenderSystem {
+namespace Flow
+{
+class RenderSystem
+{
 public:
 static inline bool bDrawDebugColliders = false;
 
-static void Draw(entt::registry& registry, sf::RenderWindow& window)
+static void Draw(entt::registry& Registry, sf::RenderWindow& Window)
 {
 
-auto animView = registry.view<Transform, AnimatorComponent>();
-for (auto entity : animView) {
-auto& transform = animView.get<Transform>(entity);
-auto& anim = animView.get<AnimatorComponent>(entity);
+auto PlayerView = Registry.view<PlatformerController, Transform, BoxCollider>();
 
-auto it = anim.animations.find(anim.currentState);
-if (it == anim.animations.end() || !it->second.texture) continue;
+if (PlayerView.begin() != PlayerView.end())
+{
 
-Animation& currentAnim = it->second;
-sf::Sprite sprite(*currentAnim.texture);
+auto Entity = *PlayerView.begin();
 
-sf::IntRect rect = currentAnim.frames[anim.currentFrame];
-sprite.setTextureRect(rect);
+auto& pTrans = PlayerView.get<Transform>(Entity);
+auto& pBox = PlayerView.get<BoxCollider>(Entity);
 
-if (anim.bFlipX) {
-sprite.setScale({ -1.0f, 1.0f });
-sprite.setOrigin({ (float)rect.size.x, 0.0f });
-}
-else {
-sprite.setScale({ 1.0f, 1.0f });
-sprite.setOrigin({ 0.0f, 0.0f });
+float CenterX = pTrans.x + (pBox.width / 2.0f);
+float CenterY = pTrans.y + (pBox.height / 2.0f);
+
+sf::View Camera(sf::Vector2f(CenterX, CenterY), sf::Vector2f(1280.0f, 720.0f));
+
+Window.setView(Camera);
 }
 
-sprite.setPosition({ transform.x, transform.y });
-window.draw(sprite);
+auto AnimView = Registry.view<Transform, BoxCollider, AnimatorComponent>();
+for (auto Entity : AnimView)
+{
+auto& pTrans = AnimView.get<Transform>(Entity);
+auto& pBox = AnimView.get<BoxCollider>(Entity);
+auto& pAnim = AnimView.get<AnimatorComponent>(Entity);
+
+auto It = pAnim.animations.find(pAnim.currentState);
+if (It == pAnim.animations.end() || !It->second.texture) continue;
+
+Animation& CurrentAnim = It->second;
+sf::Sprite Sprite(*CurrentAnim.texture);
+
+sf::IntRect Rect = CurrentAnim.frames[pAnim.currentFrame];
+Sprite.setTextureRect(Rect);
+
+Sprite.setOrigin({ Rect.size.x / 2.0f, Rect.size.y / 2.0f });
+
+if (pAnim.bFlipX)
+{
+Sprite.setScale({ -1.0f, 1.0f });
+}
+else
+{
+Sprite.setScale({ 1.0f, 1.0f });
 }
 
-auto staticView = registry.view<Transform, BoxCollider>();
-for (auto entity : staticView) {
-if (registry.any_of<AnimatorComponent>(entity)) continue;
+float BoxCenterX = pTrans.x + pBox.offsetX + (pBox.width / 2.0f);
+float BoxCenterY = pTrans.y + pBox.offsetY + (pBox.height / 2.0f);
 
-auto& transform = staticView.get<Transform>(entity);
-auto& box = staticView.get<BoxCollider>(entity);
+Sprite.setPosition({ BoxCenterX, BoxCenterY - 10.0f });
 
-sf::RectangleShape rect({ box.width, box.height });
-rect.setFillColor(sf::Color::Green);
-rect.setPosition({ transform.x + box.offsetX, transform.y + box.offsetY });
+Window.draw(Sprite);
+}
 
-window.draw(rect);
+auto StaticView = Registry.view<Transform, BoxCollider>();
+for (auto Entity : StaticView)
+{
+if (Registry.any_of<AnimatorComponent>(Entity)) continue;
+
+auto& pTrans = StaticView.get<Transform>(Entity);
+auto& pBox = StaticView.get<BoxCollider>(Entity);
+
+sf::RectangleShape RectShape({ pBox.width, pBox.height });
+RectShape.setFillColor(sf::Color::Green);
+RectShape.setPosition({ pTrans.x + pBox.offsetX, pTrans.y + pBox.offsetY });
+
+Window.draw(RectShape);
 }
 
 if (bDrawDebugColliders)
 {
-auto debugView = registry.view<Transform, BoxCollider>();
-for (auto entity : debugView) {
-auto& transform = debugView.get<Transform>(entity);
-auto& box = debugView.get<BoxCollider>(entity);
+auto DebugView = Registry.view<Transform, BoxCollider>();
+for (auto Entity : DebugView)
+{
+auto& pTrans = DebugView.get<Transform>(Entity);
+auto& pBox = DebugView.get<BoxCollider>(Entity);
 
-sf::RectangleShape outline({ box.width, box.height });
-outline.setFillColor(sf::Color::Transparent);
+sf::RectangleShape Outline({ pBox.width, pBox.height });
+Outline.setFillColor(sf::Color::Transparent);
 
-if (registry.any_of<PlayerController>(entity) || registry.any_of<PlatformerController>(entity)) {
-outline.setOutlineColor(sf::Color::Red);
+if (Registry.any_of<PlatformerController>(Entity))
+{
+Outline.setOutlineColor(sf::Color::Red);
 }
-else {
-outline.setOutlineColor(sf::Color::Yellow);
-}
-outline.setOutlineThickness(1.0f);
-outline.setPosition({ transform.x + box.offsetX, transform.y + box.offsetY });
-
-window.draw(outline);
-}
+else
+{
+Outline.setOutlineColor(sf::Color::Yellow);
 }
 
+Outline.setOutlineThickness(1.0f);
+Outline.setPosition({ pTrans.x + pBox.offsetX, pTrans.y + pBox.offsetY });
+
+Window.draw(Outline);
+}
+}
+Window.setView(Window.getDefaultView());
 }
 };
 }
@@ -1578,24 +1625,29 @@ std::unordered_map<std::string, std::shared_ptr<sf::Texture>> Textures;
 
 FILE: ./Flow/src/Utils/DebugOverlay.h
 ------------------------------
-/*
 #pragma once
-#ifndef NDEBUG
-#include "imgui.h"
+
+#include <imgui.h>
 #include <entt/entt.hpp>
+#include "ECS/Components.h"
 
-namespace FlowEngine {
-class DebugOverlay {
+namespace Flow
+{
+class DebugOverlay
+{
 public:
-
 static inline bool bIsVisible = false;
 
-static void Draw(float currentFPS, entt::registry& registry, entt::entity trackedEntityID) {
-if (!bIsVisible) return;
+static void Draw(float CurrentFPS, entt::registry& Registry, entt::entity TrackedEntityID)
+{
+if (!bIsVisible)
+{
+return;
+}
 
-ImGuiIO& io = ImGui::GetIO();
+ImGuiIO& IO = ImGui::GetIO();
 
-ImGuiWindowFlags window_flags =
+ImGuiWindowFlags WindowFlags =
 ImGuiWindowFlags_NoDecoration |
 ImGuiWindowFlags_AlwaysAutoResize |
 ImGuiWindowFlags_NoSavedSettings |
@@ -1603,34 +1655,35 @@ ImGuiWindowFlags_NoFocusOnAppearing |
 ImGuiWindowFlags_NoNav |
 ImGuiWindowFlags_NoMove;
 
-ImVec2 window_pos = ImVec2(10.0f, io.DisplaySize.y - 10.0f);
-ImVec2 window_pos_pivot = ImVec2(0.0f, 1.0f);
-ImGui::SetNextWindowPos(window_pos, ImGuiCond_Always, window_pos_pivot);
+ImVec2 WindowPos = ImVec2(10.0f, IO.DisplaySize.y - 10.0f);
+ImVec2 WindowPosPivot = ImVec2(0.0f, 1.0f);
+ImGui::SetNextWindowPos(WindowPos, ImGuiCond_Always, WindowPosPivot);
 ImGui::SetNextWindowBgAlpha(0.35f);
 
-if (ImGui::Begin("BottomOverlay", &bIsVisible, window_flags)) {
-
+if (ImGui::Begin("BottomOverlay", &bIsVisible, WindowFlags))
+{
 ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.0f, 1.0f), "FLOW ENGINE DEBUG (~) ");
 ImGui::Separator();
-ImGui::Text("FPS: %.1f", currentFPS);
+ImGui::Text("FPS: %.1f", CurrentFPS);
 ImGui::Separator();
 
-if (registry.valid(trackedEntityID)) {
-
-if (auto* transform = registry.try_get<Transform>(trackedEntityID)) {
-ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "Tracking Entity: %d", (uint32_t)trackedEntityID);
-ImGui::Text("PosX: %.2f | PosY: %.2f", transform->x, transform->y);
+if (Registry.valid(TrackedEntityID))
+{
+if (auto* TransformPtr = Registry.try_get<Transform>(TrackedEntityID))
+{
+ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "Tracking Entity: %d", static_cast<uint32_t>(TrackedEntityID));
+ImGui::Text("PosX: %.2f | PosY: %.2f", TransformPtr->x, TransformPtr->y);
 }
 }
-else {
-ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "Tracked Entity %d is DEAD or INVALID", (uint32_t)trackedEntityID);
+else
+{
+ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "Tracked Entity %d is DEAD or INVALID", static_cast<uint32_t>(TrackedEntityID));
 }
 }
 ImGui::End();
 }
 };
 }
-#endif
 
 FILE: ./Flow/src/Utils/IniParser.h
 ------------------------------
@@ -1645,6 +1698,76 @@ class IniParser
 public:
 
 static std::unordered_map<std::string, std::string> Load(const std::string& FilePath);
+};
+}
+
+FILE: ./Flow/src/Utils/LevelManager.h
+------------------------------
+#pragma once
+#include <entt/entt.hpp>
+#include <nlohmann/json.hpp>
+#include <fstream>
+#include <string>
+#include "ECS/Components.h"
+#include "Utils/Log.h"
+
+namespace Flow
+{
+class LevelManager
+{
+public:
+static bool LoadLevel(const std::string& FilePath, entt::registry& Registry)
+{
+std::ifstream File(FilePath);
+if (!File.is_open())
+{
+FLOW_LOG_ERROR("LevelManager: Failed to open map file -> " + FilePath);
+return false;
+}
+
+nlohmann::json MapData;
+try
+{
+File >> MapData;
+}
+catch (nlohmann::json::parse_error& Error)
+{
+FLOW_LOG_ERROR(std::string("LevelManager JSON Parse Error: ") + Error.what());
+return false;
+}
+
+int MapWidth = MapData["MapWidth"];
+int MapHeight = MapData["MapHeight"];
+float TileSize = MapData["TileSize"];
+
+int Index = 0;
+
+for (int TileID : MapData["TileData"])
+{
+if (TileID > 0)
+{
+
+int GridX = Index % MapWidth;
+int GridY = Index / MapWidth;
+
+float WorldX = GridX * TileSize;
+float WorldY = GridY * TileSize;
+
+auto TileEntity = Registry.create();
+
+Registry.emplace<Transform>(TileEntity, WorldX, WorldY);
+
+auto& Box = Registry.emplace<BoxCollider>(TileEntity, TileSize, TileSize);
+Box.objectType = CollisionChannel::WorldStatic;
+
+}
+
+Index++;
+}
+
+FLOW_LOG_INFO("LevelManager: Successfully loaded level -> " + FilePath);
+return true;
+}
 };
 }
 
@@ -1839,13 +1962,13 @@ COMMAND ${CMAKE_COMMAND} -E copy_directory
 ${CMAKE_SOURCE_DIR}/Configs
 $<TARGET_FILE_DIR:Sandbox>/Configs
 COMMENT "Copying Configs folder to the exact binary directory..."
+)
 
 add_custom_command(TARGET Sandbox POST_BUILD
 COMMAND ${CMAKE_COMMAND} -E copy_directory
 ${CMAKE_SOURCE_DIR}/Assets
 $<TARGET_FILE_DIR:Sandbox>/Assets
 COMMENT "Syncing entire Assets tree to binary directory..."
-)
 )
 
 FILE: ./Sandbox/src/SandboxApp.cpp
@@ -1862,70 +1985,76 @@ FILE: ./Sandbox/src/SandboxApp.cpp
 #include "ECS/Systems/PlatformCollisionSystem.h"
 #include "Utils/AssetManager.h"
 #include "ECS/Systems/AnimationSystem.h"
+#include "Utils/LevelManager.h"
+#include "Utils/DebugOverlay.h"
 
 class Sandbox : public Flow::Application
 
 {
+private:
+
+entt::entity PlayerEntityID = entt::null;
+
 public:
 virtual void OnStart() override
 {
 std::cout << "Current working directory is: " << std::filesystem::current_path() << std::endl;
 
-auto floor = GetRegistry().create();
-GetRegistry().emplace<Flow::Transform>(floor, 0.0f, 650.0f);
-auto& floorBox = GetRegistry().emplace<Flow::BoxCollider>(floor, 1280.0f, 50.0f);
-floorBox.objectType = Flow::CollisionChannel::WorldStatic;
+Flow::LevelManager::LoadLevel("Assets/Levels/Level_01.json", GetRegistry());
 
-auto plat1 = GetRegistry().create();
-GetRegistry().emplace<Flow::Transform>(plat1, 300.0f, 500.0f);
-GetRegistry().emplace<Flow::BoxCollider>(plat1, 200.0f, 20.0f);
+auto Player = GetRegistry().create();
+PlayerEntityID = Player;
 
-auto plat2 = GetRegistry().create();
-GetRegistry().emplace<Flow::Transform>(plat2, 700.0f, 400.0f);
-GetRegistry().emplace<Flow::BoxCollider>(plat2, 200.0f, 20.0f);
+GetRegistry().emplace<Flow::Transform>(Player, 64.0f, 100.0f);
+GetRegistry().emplace<Flow::Velocity>(Player, 0.0f, 0.0f);
 
-auto plat3 = GetRegistry().create();
-GetRegistry().emplace<Flow::Transform>(plat3, 400.0f, 250.0f);
-GetRegistry().emplace<Flow::BoxCollider>(plat3, 150.0f, 20.0f);
-
-auto player = GetRegistry().create();
-GetRegistry().emplace<Flow::Transform>(player, 100.0f, 500.0f);
-GetRegistry().emplace<Flow::Velocity>(player, 0.0f, 0.0f);
-
-auto& pCtrl = GetRegistry().emplace<Flow::PlatformerController>(player);
+auto& pCtrl = GetRegistry().emplace<Flow::PlatformerController>(Player);
 pCtrl.moveSpeed = 400.0f;
 pCtrl.jumpForce = 700.0f;
 
-auto& pBox = GetRegistry().emplace<Flow::BoxCollider>(player, 40.0f, 40.0f);
+auto& pBox = GetRegistry().emplace<Flow::BoxCollider>(Player, 40.0f, 40.0f);
 pBox.objectType = Flow::CollisionChannel::Player;
 
-auto& pAnim = GetRegistry().emplace<Flow::AnimatorComponent>(player);
+auto& pAnim = GetRegistry().emplace<Flow::AnimatorComponent>(Player);
 Flow::AssetManager::Get().BuildAnimatorFromJson("Assets/Hero/Hero.json", pAnim);
 
 FLOW_LOG_INFO("Sandbox: Platformer Testbed Initialized!");
 }
 
-virtual void OnUpdate(float deltaTime) override
+virtual void OnUpdate(float DeltaTime) override
 {
+auto& Actions = GetInputManager().GetFrameActions();
 
-auto& actions = GetInputManager().GetFrameActions();
+Flow::PlatformMovementSystem::Update(GetRegistry(), Actions, DeltaTime);
+Flow::PlatformCollisionSystem::Update(GetRegistry(), DeltaTime);
+Flow::AnimationSystem::Update(GetRegistry(), DeltaTime);
 
-Flow::PlatformMovementSystem::Update(GetRegistry(), actions, deltaTime);
-
-Flow::PlatformCollisionSystem::Update(GetRegistry(), deltaTime);
-
-Flow::AnimationSystem::Update(GetRegistry(), deltaTime);
-
-if (sf::Keyboard::isKeyPressed(sf::Keyboard::F3)) {
-static bool f3WasPressed = false;
-if (!f3WasPressed) {
+static bool bF3WasPressed = false;
+if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::F3))
+{
+if (!bF3WasPressed)
+{
 Flow::RenderSystem::bDrawDebugColliders = !Flow::RenderSystem::bDrawDebugColliders;
-f3WasPressed = true;
+bF3WasPressed = true;
 }
 }
-else {
+else
+{
+bF3WasPressed = false;
+}
 
-f3WasPressed = false;
+static bool bTildeWasPressed = false;
+if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::Grave))
+{
+if (!bTildeWasPressed)
+{
+Flow::DebugOverlay::bIsVisible = !Flow::DebugOverlay::bIsVisible;
+bTildeWasPressed = true;
+}
+}
+else
+{
+bTildeWasPressed = false;
 }
 }
 
@@ -1933,6 +2062,9 @@ virtual void Draw() override
 {
 
 Flow::RenderSystem::Draw(GetRegistry(), GetWindow());
+
+float CurrentFPS = 1.0f / GetRealDeltaTime();
+Flow::DebugOverlay::Draw(CurrentFPS, GetRegistry(), PlayerEntityID);
 }
 };
 
@@ -1945,10 +2077,12 @@ return new Sandbox();
 PROJECT HIERARCHY:
 .
 ├── Assets
-│   └── Hero
-│       ├── Hero.JSON
-│       ├── Idle.png
-│       └── Run.png
+│   ├── Hero
+│   │   ├── Hero.JSON
+│   │   ├── Idle.png
+│   │   └── Run.png
+│   └── Levels
+│       └── Level_01.JSON
 ├── Configs
 │   └── Engine.ini
 ├── Flow
@@ -1979,6 +2113,7 @@ PROJECT HIERARCHY:
 │   │   │   ├── DebugOverlay.h
 │   │   │   ├── IniParser.cpp
 │   │   │   ├── IniParser.h
+│   │   │   ├── LevelManager.h
 │   │   │   └── Log.h
 │   │   ├── Application.cpp
 │   │   ├── Application.h

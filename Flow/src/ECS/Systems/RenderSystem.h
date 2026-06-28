@@ -1,86 +1,136 @@
+// FILE: ./Flow/src/ECS/Systems/RenderSystem.h
 #pragma once
 #include <entt/entt.hpp>
 #include <SFML/Graphics.hpp>
 #include "ECS/Components.h"
 
-namespace Flow {
-    class RenderSystem {
+namespace Flow
+{
+    class RenderSystem
+    {
     public:
         static inline bool bDrawDebugColliders = false;
 
-        static void Draw(entt::registry& registry, sf::RenderWindow& window) 
+        static void Draw(entt::registry& Registry, sf::RenderWindow& Window)
         {
+            // ---------------------------------------------------------
+            // 1. CAMERA SYSTEM SETUP (Follow the Active Player)
+            // ---------------------------------------------------------
+            auto PlayerView = Registry.view<PlatformerController, Transform, BoxCollider>();
 
-            // 1. Draw Animated Entities (The Player)
-            auto animView = registry.view<Transform, AnimatorComponent>();
-            for (auto entity : animView) {
-                auto& transform = animView.get<Transform>(entity);
-                auto& anim = animView.get<AnimatorComponent>(entity);
+            if (PlayerView.begin() != PlayerView.end())
+            {
+                auto Entity = *PlayerView.begin();
+                auto& pTrans = PlayerView.get<Transform>(Entity);
+                auto& pBox = PlayerView.get<BoxCollider>(Entity);
 
-                // Fetch the animation first
-                auto it = anim.animations.find(anim.currentState);
-                if (it == anim.animations.end() || !it->second.texture) continue;
+                float CenterX = pTrans.x + (pBox.width / 2.0f);
+                float CenterY = pTrans.y + (pBox.height / 2.0f);
 
-                Animation& currentAnim = it->second;
-                sf::Sprite sprite(*currentAnim.texture);
-
-                sf::IntRect rect = currentAnim.frames[anim.currentFrame];
-                sprite.setTextureRect(rect);
-
-                if (anim.bFlipX) {
-                    sprite.setScale({ -1.0f, 1.0f });
-                    sprite.setOrigin({ (float)rect.size.x, 0.0f }); // Use .size.x
-                }
-                else {
-                    sprite.setScale({ 1.0f, 1.0f });
-                    sprite.setOrigin({ 0.0f, 0.0f });
-                }
-
-                sprite.setPosition({ transform.x, transform.y });
-                window.draw(sprite);
+                sf::View Camera(sf::Vector2f(CenterX, CenterY), sf::Vector2f(1280.0f, 720.0f));
+                Window.setView(Camera);
             }
 
-            // 2. Draw Static Geometry (Floors and Platforms)
-            // We draw everything that has a BoxCollider but NO AnimatorComponent
-            auto staticView = registry.view<Transform, BoxCollider>();
-            for (auto entity : staticView) {
-                if (registry.any_of<AnimatorComponent>(entity)) continue;
+            // ---------------------------------------------------------
+            // 2. BACKGROUND LAYER: STATIC WORLD TILES
+            // ---------------------------------------------------------
+            auto StaticView = Registry.view<Transform, BoxCollider>();
+            for (auto Entity : StaticView)
+            {
+                // Skip rendering if this entity represents an animated character
+                if (Registry.any_of<AnimatorComponent>(Entity))
+                {
+                    continue;
+                }
 
-                auto& transform = staticView.get<Transform>(entity);
-                auto& box = staticView.get<BoxCollider>(entity);
+                auto& pTrans = StaticView.get<Transform>(Entity);
+                auto& pBox = StaticView.get<BoxCollider>(Entity);
 
-                sf::RectangleShape rect({ box.width, box.height });
-                rect.setFillColor(sf::Color::Green);
-                rect.setPosition({ transform.x + box.offsetX, transform.y + box.offsetY });
+                sf::RectangleShape RectShape({ pBox.width, pBox.height });
+                RectShape.setFillColor(sf::Color::Green);
+                RectShape.setPosition({ pTrans.x + pBox.offsetX, pTrans.y + pBox.offsetY });
 
-                window.draw(rect);
+                Window.draw(RectShape);
             }
 
-            // NEW: Debug Collider Rendering
+            // ---------------------------------------------------------
+            // 3. FOREGROUND LAYER: ANIMATED CHARACTERS & ACTORS
+            // ---------------------------------------------------------
+            auto AnimView = Registry.view<Transform, BoxCollider, AnimatorComponent>();
+            for (auto Entity : AnimView)
+            {
+                auto& pTrans = AnimView.get<Transform>(Entity);
+                auto& pBox = AnimView.get<BoxCollider>(Entity);
+                auto& pAnim = AnimView.get<AnimatorComponent>(Entity);
+
+                auto It = pAnim.animations.find(pAnim.currentState);
+                if (It == pAnim.animations.end() || !It->second.texture)
+                {
+                    continue;
+                }
+
+                Animation& CurrentAnim = It->second;
+                sf::Sprite Sprite(*CurrentAnim.texture);
+
+                sf::IntRect Rect = CurrentAnim.frames[pAnim.currentFrame];
+                Sprite.setTextureRect(Rect);
+
+                // Set origin point to structural center of sprite textures
+                Sprite.setOrigin({ Rect.size.x / 2.0f, Rect.size.y / 2.0f });
+
+                if (pAnim.bFlipX)
+                {
+                    Sprite.setScale({ -1.0f, 1.0f });
+                }
+                else
+                {
+                    Sprite.setScale({ 1.0f, 1.0f });
+                }
+
+                // Compute screen coordinates centered over the collision volumes
+                float BoxCenterX = pTrans.x + pBox.offsetX + (pBox.width / 2.0f);
+                float BoxCenterY = pTrans.y + pBox.offsetY + (pBox.height / 2.0f);
+
+                // Offset the asset vertically slightly so character feet align with ground lines
+                Sprite.setPosition({ BoxCenterX, BoxCenterY - 10.0f });
+
+                Window.draw(Sprite);
+            }
+
+            // ---------------------------------------------------------
+            // 4. DIAGNOSTIC OVERLAY LAYER: DEBUG BOUNDING BOXES
+            // ---------------------------------------------------------
             if (bDrawDebugColliders)
             {
-                auto debugView = registry.view<Transform, BoxCollider>();
-                for (auto entity : debugView) {
-                    auto& transform = debugView.get<Transform>(entity);
-                    auto& box = debugView.get<BoxCollider>(entity);
+                auto DebugView = Registry.view<Transform, BoxCollider>();
+                for (auto Entity : DebugView)
+                {
+                    auto& pTrans = DebugView.get<Transform>(Entity);
+                    auto& pBox = DebugView.get<BoxCollider>(Entity);
 
-                    sf::RectangleShape outline({ box.width, box.height });
-                    outline.setFillColor(sf::Color::Transparent); // Empty inside
+                    sf::RectangleShape Outline({ pBox.width, pBox.height });
+                    Outline.setFillColor(sf::Color::Transparent);
 
-                    // Red for player, Yellow for everything else
-                    if (registry.any_of<PlayerController>(entity) || registry.any_of<PlatformerController>(entity)) {
-                        outline.setOutlineColor(sf::Color::Red);
+                    if (Registry.any_of<PlatformerController>(Entity))
+                    {
+                        Outline.setOutlineColor(sf::Color::Red);
                     }
-                    else {
-                        outline.setOutlineColor(sf::Color::Yellow);
+                    else
+                    {
+                        Outline.setOutlineColor(sf::Color::Yellow);
                     }
-                    outline.setOutlineThickness(1.0f);
-                    outline.setPosition({ transform.x + box.offsetX, transform.y + box.offsetY });
 
-                    window.draw(outline);
+                    Outline.setOutlineThickness(1.0f);
+                    Outline.setPosition({ pTrans.x + pBox.offsetX, pTrans.y + pBox.offsetY });
+
+                    Window.draw(Outline);
                 }
             }
 
+            // ---------------------------------------------------------
+            // 5. SCREENSPACE INITIALIZATION RESET
+            // ---------------------------------------------------------
+            Window.setView(Window.getDefaultView());
         }
     };
 }

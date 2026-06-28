@@ -1,6 +1,7 @@
 #include "Engine.h"
 #include <iostream>
 #include <Utils/IniParser.h>
+#include <imgui-SFML.h>
 
 
 
@@ -18,6 +19,15 @@ namespace Flow
         LoadConfiguration();
         BootWindow();
 
+        // INITIALIZE IMGUI-SFML BACKEND VIEWPORTS---------------------
+        // Cast to void satisfies the nodiscard safety attribute under strict compilation levels
+        (void)ImGui::SFML::Init(Window);
+
+        
+
+
+       
+        /////-------------------------------------------------------
         // ---------------------------------------------------------
         // Activate the Default Input Context
         // ---------------------------------------------------------
@@ -43,7 +53,7 @@ namespace Flow
         // 1. Tell the manager to load and automatically serialize the file
         ConfigSys.Load("Configs/Engine.ini");
 
-              std::cout << "Flow [Engine] Configuration Applied Successfully.\n";
+        std::cout << "Flow [Engine] Configuration Applied Successfully.\n";
         std::cout << "  -> Resolution : " << GetConfig().WindowWidth << "x" << GetConfig().WindowHeight << "\n";
         std::cout << "  -> Window Name: " << GetConfig().WindowName << "\n";
     }
@@ -68,6 +78,10 @@ namespace Flow
 	void Engine::ShutdownEngine()
 	{
 		std::cout << "Flow [Engine] Core Subsystems Shutting Down....\n";
+
+        // CLEANUP IMGUI CORE ALLOCATIONS BEFORE DEVICE DISPOSAL
+        ImGui::SFML::Shutdown();
+
 		bIsEngineRunning = false;
 	}
 }
